@@ -10020,11 +10020,13 @@ var PolRozprawka = function PolRozprawka(_ref_r) {
 
 var MathWarmup = function MathWarmup() {
   var STORAGE_KEY = 'mathWarmupRecords';
+  var CUSTOM_KEY = 'mathWarmupCustom';
   var CATEGORIES = [
     {id:'add', label:'Dodawanie', sym:'+'},
     {id:'sub', label:'Odejmowanie', sym:'-'},
     {id:'mul', label:'Mnożenie', sym:'×'},
     {id:'div', label:'Dzielenie', sym:'÷'},
+    {id:'custom', label:'Własne', sym:'✎'},
   ];
   var LEVELS = [
     {val:5,label:'do 5'},
@@ -10046,6 +10048,33 @@ var MathWarmup = function MathWarmup() {
   var _s9 = useState(null), feedback = _s9[0], setFeedback = _s9[1];
   var _s10 = useState(null), elapsed = _s10[0], setElapsed = _s10[1];
   var inputRef = useRef(null);
+
+  // ── Własne przykłady (custom) ──
+  function loadCustom() {
+    try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); } catch(e) { return []; }
+  }
+  function saveCustomList(list) {
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch(e) {}
+  }
+  var _cu0 = useState(loadCustom), customList = _cu0[0], setCustomList = _cu0[1];
+  var _cu1 = useState(''), newCustomQ = _cu1[0], setNewCustomQ = _cu1[1];
+  var _cu2 = useState(''), newCustomAns = _cu2[0], setNewCustomAns = _cu2[1];
+
+  function addCustom() {
+    var q = newCustomQ.trim();
+    var ansNum = parseFloat(newCustomAns);
+    if (!q || isNaN(ansNum)) return;
+    var updated = customList.concat([{id:'cq_'+Date.now(), q:q, ans:ansNum}]);
+    setCustomList(updated);
+    saveCustomList(updated);
+    setNewCustomQ('');
+    setNewCustomAns('');
+  }
+  function removeCustom(id) {
+    var updated = customList.filter(function(c){ return c.id !== id; });
+    setCustomList(updated);
+    saveCustomList(updated);
+  }
 
   function loadRecords() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch(e) { return {}; }
@@ -10072,8 +10101,9 @@ var MathWarmup = function MathWarmup() {
       b = Math.floor(Math.random()*max)+1;
       q = a + ' + ' + b; ans = a+b;
     } else if (catId === 'sub') {
+      // Losujemy a i b niezależnie w tym samym zakresie — wynik może wyjść na minus.
       a = Math.floor(Math.random()*max)+1;
-      b = Math.floor(Math.random()*a)+1;
+      b = Math.floor(Math.random()*max)+1;
       q = a + ' - ' + b; ans = a-b;
     } else if (catId === 'mul') {
       a = Math.floor(Math.random()*max)+1;
@@ -10090,14 +10120,21 @@ var MathWarmup = function MathWarmup() {
 
   function startGame() {
     var qs = [];
-    for (var i=0; i<qCount; i++) qs.push(genQuestion(cat, maxN));
+    if (cat === 'custom') {
+      var pool = customList.slice().sort(function(){ return Math.random()-.5; });
+      var n = Math.min(qCount, pool.length);
+      for (var i=0; i<n; i++) qs.push({q: pool[i].q, ans: pool[i].ans});
+    } else {
+      for (var j=0; j<qCount; j++) qs.push(genQuestion(cat, maxN));
+    }
+    if (qs.length === 0) return;
     setQuestions(qs); setQIdx(0); setResults([]); setAnswer(''); setFeedback(null);
     setStartTime(Date.now()); setPhase('game');
     setTimeout(function(){ if(inputRef.current) inputRef.current.focus(); },100);
   }
 
   function submitAnswer() {
-    var num = parseInt(answer, 10);
+    var num = parseFloat(answer);
     var q = questions[qIdx];
     var correct = num === q.ans;
     var newResults = results.concat([{q: q.q, ans: q.ans, given: num, ok: correct}]);
@@ -10112,7 +10149,7 @@ var MathWarmup = function MathWarmup() {
           var t = (Date.now()-startTime)/1000;
           setElapsed(t);
           var score = newResults.filter(function(r){return r.ok;}).length;
-          saveRecord(cat, maxN, score, questions.length, t);
+          saveRecord(cat, cat==='custom'?'custom':maxN, score, questions.length, t);
           setPhase('result');
         } else {
           setQIdx(qIdx+1);
@@ -10128,7 +10165,7 @@ var MathWarmup = function MathWarmup() {
         var t = (Date.now()-startTime)/1000;
         setElapsed(t);
         var score2 = newResults.filter(function(r){return r.ok;}).length;
-        saveRecord(cat, maxN, score2, questions.length, t);
+        saveRecord(cat, cat==='custom'?'custom':maxN, score2, questions.length, t);
         setTimeout(function(){ setPhase('result'); }, 200);
       } else {
         setQIdx(qIdx+1);
@@ -10142,7 +10179,7 @@ var MathWarmup = function MathWarmup() {
   }
 
   var catInfo = CATEGORIES.find(function(c){return c.id===cat;});
-  var rec = getRecord(cat, maxN);
+  var rec = getRecord(cat, cat==='custom'?'custom':maxN);
 
   if (phase === 'menu') return React.createElement('div', {style:{padding:'8px 0'}},
     React.createElement('div', {style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}},
@@ -10157,13 +10194,13 @@ var MathWarmup = function MathWarmup() {
             color: cat===c.id ? '#fff' : 'var(--text)',
             borderColor: cat===c.id ? 'var(--math)' : 'var(--border)',
           }
-        }, c.label);
+        }, c.sym+' '+c.label);
       })
     ),
-    React.createElement('div', {style:{marginBottom:20}},
+    cat !== 'custom' && React.createElement('div', {style:{marginBottom:20}},
       React.createElement('div', {style:{display:'flex',justifyContent:'space-between',marginBottom:8}},
-        React.createElement('span', {style:{color:'var(--muted)',fontSize:13}}, cat==='tab'?'Zakres tabliczki mnożenia:':'Zakres liczb:'),
-        React.createElement('span', {style:{color:'var(--math)',fontWeight:600,fontSize:14}}, cat==='tab'?'do '+maxN+' × 9':('do '+maxN))
+        React.createElement('span', {style:{color:'var(--muted)',fontSize:13}}, 'Zakres liczb:'),
+        React.createElement('span', {style:{color:'var(--math)',fontWeight:600,fontSize:14}}, 'do '+maxN)
       ),
       React.createElement('div', {style:{display:'flex',gap:8,flexWrap:'wrap'}},
         LEVELS.map(function(l){
@@ -10184,11 +10221,50 @@ var MathWarmup = function MathWarmup() {
         })
       )
     ),
+    cat === 'custom' && React.createElement('div', {style:{marginBottom:20}},
+      React.createElement('div', {style:{color:'var(--muted)',fontSize:13,marginBottom:10}}, 'Twoje własne przykłady (np. 6 × 8 = 48):'),
+      React.createElement('div', {style:{display:'flex',gap:8,marginBottom:12}},
+        React.createElement('input', {
+          type:'text', value:newCustomQ,
+          onChange:function(e){setNewCustomQ(e.target.value);},
+          placeholder:'np. 6 × 8',
+          style:{flex:1,fontSize:14,padding:'10px 12px',borderRadius:10,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontFamily:'Outfit,sans-serif'}
+        }),
+        React.createElement('input', {
+          type:'number', value:newCustomAns,
+          onChange:function(e){setNewCustomAns(e.target.value);},
+          placeholder:'odp.',
+          onKeyDown:function(e){ if(e.key==='Enter') addCustom(); },
+          style:{width:90,fontSize:14,padding:'10px 12px',borderRadius:10,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontFamily:'Outfit,sans-serif'}
+        }),
+        React.createElement('button', {
+          onClick:addCustom,
+          style:{padding:'0 18px',borderRadius:10,border:'none',background:'var(--math)',color:'#fff',fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:'Outfit,sans-serif'}
+        }, '+ Dodaj')
+      ),
+      customList.length === 0
+        ? React.createElement('div', {style:{color:'var(--muted)',fontSize:13,padding:'12px 0',textAlign:'center'}}, 'Brak własnych przykładów. Dodaj pierwszy powyżej.')
+        : React.createElement('div', {style:{display:'flex',flexDirection:'column',gap:6,maxHeight:220,overflowY:'auto'}},
+            customList.map(function(c) {
+              return React.createElement('div', {
+                key:c.id,
+                style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)'}
+              },
+                React.createElement('span', {style:{fontSize:13,color:'var(--text)'}}, c.q+' = '+c.ans),
+                React.createElement('button', {
+                  onClick:function(){removeCustom(c.id);},
+                  style:{background:'none',border:'none',color:'var(--math)',cursor:'pointer',fontSize:13,padding:'2px 6px'}
+                }, '✕')
+              );
+            })
+          ),
+      customList.length > 0 && React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:8}}, customList.length+' przykładów zapisanych')
+    ),
     React.createElement('div', {style:{marginBottom:24}},
       React.createElement('div', {style:{color:'var(--muted)',fontSize:13,marginBottom:8}}, 'Liczba pytań:'),
       React.createElement('div', {style:{display:'flex',alignItems:'center',gap:12}},
         React.createElement('input', {
-          type:'range', min:5, max:30, step:5, value:qCount,
+          type:'range', min:5, max: cat==='custom' ? Math.max(5,customList.length) : 30, step:5, value:qCount,
           onChange:function(e){setQCount(Number(e.target.value));},
           style:{flex:1}
         }),
@@ -10202,9 +10278,14 @@ var MathWarmup = function MathWarmup() {
     ),
     React.createElement('button', {
       onClick:startGame,
+      disabled: cat==='custom' && customList.length===0,
       style:{
-        background:'var(--math)',color:'#fff',border:'none',padding:'12px 32px',
-        borderRadius:12,fontSize:16,fontWeight:600,cursor:'pointer',width:'100%',
+        background: (cat==='custom' && customList.length===0) ? 'var(--surface3)' : 'var(--math)',
+        color: (cat==='custom' && customList.length===0) ? 'var(--muted)' : '#fff',
+        border:'none',padding:'12px 32px',
+        borderRadius:12,fontSize:16,fontWeight:600,
+        cursor: (cat==='custom' && customList.length===0) ? 'not-allowed' : 'pointer',
+        width:'100%',
         fontFamily:'Outfit,sans-serif',letterSpacing:'.5px'
       }
     }, 'START')
@@ -10217,7 +10298,7 @@ var MathWarmup = function MathWarmup() {
     return React.createElement('div', {style:{padding:'8px 0'}},
       React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
         React.createElement('span', {style:{color:'var(--muted)',fontSize:13}}, (qIdx+1)+' / '+questions.length),
-        React.createElement('span', {style:{color:'var(--math)',fontSize:13,fontWeight:600}}, catInfo.label+' · do '+maxN),
+        React.createElement('span', {style:{color:'var(--math)',fontSize:13,fontWeight:600}}, catInfo.label + (cat!=='custom' ? (' · do '+maxN) : '')),
         React.createElement('button', {onClick:function(){setPhase('menu');},style:{background:'none',border:'none',color:'var(--muted)',cursor:'pointer',fontSize:13}}, '✕ Przerwij')
       ),
       React.createElement('div', {style:{height:4,background:'var(--surface3)',borderRadius:2,marginBottom:28}},
@@ -10229,7 +10310,7 @@ var MathWarmup = function MathWarmup() {
           padding:'32px 24px',textAlign:'center',marginBottom:24,transition:'border-color .2s'
         }
       },
-        React.createElement('div', {style:{fontSize:48,fontWeight:700,fontFamily:'Syne,sans-serif',color:'var(--text)',letterSpacing:2}}, q.q+' = ?'),
+        React.createElement('div', {style:{fontSize:cat==='custom'?32:48,fontWeight:700,fontFamily:'Syne,sans-serif',color:'var(--text)',letterSpacing:2}}, q.q+' = ?'),
         feedback && feedback!=='ok' && React.createElement('div', {style:{marginTop:12,color:'#ef4444',fontSize:14}}, 'Błąd! Odpowiedź: '+q.ans),
         feedback === 'ok' && React.createElement('div', {style:{marginTop:12,color:'#22c55e',fontSize:14}}, 'Dobrze!')
       ),
@@ -10260,7 +10341,7 @@ var MathWarmup = function MathWarmup() {
     var score2 = results.filter(function(r){return r.ok;}).length;
     var pct2 = Math.round(score2/results.length*100);
     var t2 = elapsed.toFixed(1);
-    var rec2 = getRecord(cat, maxN);
+    var rec2 = getRecord(cat, cat==='custom'?'custom':maxN);
     var isRecord = rec2 && rec2.pct === pct2 && Math.round(rec2.time) === Math.round(elapsed);
     return React.createElement('div', {style:{padding:'8px 0'}},
       React.createElement('div', {style:{textAlign:'center',marginBottom:24}},
