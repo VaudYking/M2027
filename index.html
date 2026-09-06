@@ -11629,6 +11629,11 @@ function emptyWeek() {
   });
   return data;
 }
+function autoGrowDiaryTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight, 70) + 'px';
+}
 var DiaryView = function DiaryView() {
   var _React$useState75 = React.useState(0),
     _React$useState76 = _slicedToArray(_React$useState75, 2),
@@ -12086,15 +12091,18 @@ var DiaryView = function DiaryView() {
           verticalAlign: 'top'
         }
       }, /*#__PURE__*/React.createElement("textarea", {
+        key: weekKey + '_' + d + '_' + rowIdx,
+        ref: autoGrowDiaryTextarea,
         value: (weekData[d].tasks || ['', '', '', ''])[rowIdx] || '',
         onChange: function onChange(e) {
+          autoGrowDiaryTextarea(e.target);
           return setTask(d, rowIdx, e.target.value);
         },
         placeholder: "",
-        rows: 2,
+        rows: 3,
         style: {
           width: '100%',
-          minHeight: 54,
+          minHeight: 70,
           background: 'transparent',
           border: '1px solid transparent',
           borderRadius: 6,
@@ -12104,7 +12112,8 @@ var DiaryView = function DiaryView() {
           padding: '5px 6px',
           fontFamily: 'Outfit',
           transition: 'all .15s',
-          resize: 'vertical',
+          resize: 'none',
+          overflow: 'hidden',
           boxSizing: 'border-box',
           overflowWrap: 'break-word'
         },
