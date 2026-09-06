@@ -12044,7 +12044,20 @@ var DiaryView = function DiaryView() {
         fontSize: 11
       }
     }, "\u2014"));
-  }), /*#__PURE__*/React.createElement("td", null)), [0, 1, 2, 3].map(function (rowIdx) {
+  }), /*#__PURE__*/React.createElement("td", null)), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 9,
+    style: {
+      padding: '8px 8px 4px',
+      background: 'var(--surface3)',
+      borderBottom: '1px solid var(--border)',
+      fontFamily: 'Syne',
+      fontSize: 10,
+      fontWeight: 700,
+      color: 'var(--muted)',
+      letterSpacing: '.06em',
+      textTransform: 'uppercase'
+    }
+  }, "\uD83D\uDCDD Zadania / do zrobienia")), [0, 1, 2, 3].map(function (rowIdx) {
     return /*#__PURE__*/React.createElement("tr", {
       key: 'task' + rowIdx,
       style: {
@@ -12057,33 +12070,43 @@ var DiaryView = function DiaryView() {
         borderRight: '1px solid var(--border)',
         position: 'sticky',
         left: 0,
-        background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface2)'
+        background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface2)',
+        fontSize: 10,
+        color: 'var(--muted)',
+        verticalAlign: 'top',
+        paddingTop: 8
       }
-    }), DIARY_DAYS_FULL.map(function (d, i) {
+    }, rowIdx + 1), DIARY_DAYS_FULL.map(function (d, i) {
       return /*#__PURE__*/React.createElement("td", {
         key: d,
         style: {
           padding: '3px 4px',
           borderRight: '1px solid var(--border)',
-          background: isCurrentWeek && i === todayIdx ? 'rgba(59,130,246,0.06)' : undefined
+          background: isCurrentWeek && i === todayIdx ? 'rgba(59,130,246,0.06)' : undefined,
+          verticalAlign: 'top'
         }
-      }, /*#__PURE__*/React.createElement("input", {
-        type: "text",
+      }, /*#__PURE__*/React.createElement("textarea", {
         value: (weekData[d].tasks || ['', '', '', ''])[rowIdx] || '',
         onChange: function onChange(e) {
           return setTask(d, rowIdx, e.target.value);
         },
         placeholder: "",
+        rows: 2,
         style: {
           width: '100%',
+          minHeight: 54,
           background: 'transparent',
           border: '1px solid transparent',
-          borderRadius: 5,
+          borderRadius: 6,
           color: 'var(--text)',
-          fontSize: 11,
-          padding: '4px 4px',
+          fontSize: 12,
+          lineHeight: 1.4,
+          padding: '5px 6px',
           fontFamily: 'Outfit',
-          transition: 'all .15s'
+          transition: 'all .15s',
+          resize: 'vertical',
+          boxSizing: 'border-box',
+          overflowWrap: 'break-word'
         },
         onFocus: function onFocus(e) {
           e.target.style.borderColor = 'var(--border)';
