@@ -10786,7 +10786,33 @@ var SubjectView = function SubjectView(_ref26) {
     value: Math.round(dynXp / xpNeeded * 100),
     color: "var(--gold)",
     height: 4
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), subject.id === 'math' && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'center',
+      gap: 12,
+      marginBottom: 20,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("a", {
+    href: "https://matematykaszkolna.pl/strona/3549.html",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "btn btn-primary",
+    style: { textDecoration: 'none', background: 'var(--math)' }
+  }, "\uD83D\uDCD8 Zadania maturalne"), /*#__PURE__*/React.createElement("a", {
+    href: "https://www.youtube.com/watch?v=aoPDEOC4wys&list=PLu0hov09N1D3-5KAJej6QJey1MavZUPjI",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "btn btn-primary",
+    style: { textDecoration: 'none', background: '#ef4444' }
+  }, "\u25B6\uFE0F YouTube"), /*#__PURE__*/React.createElement("a", {
+    href: "https://chatgpt.com/g/g-p-6a6780dc112c8191a38d3d8a07fc1a4f/c/6a6780e6-2eb8-83ed-a8af-ac3f85a95d94",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "btn btn-primary",
+    style: { textDecoration: 'none', background: '#10a37f' }
+  }, "\uD83E\uDD16 ChatGPT")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'flex-end',
