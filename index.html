@@ -370,8 +370,28 @@
     /* Buttons font size */
     .btn { font-size: 12px; padding: 8px 12px; }
 
+    /* Dziennik - mniejsza czcionka i wezsze komorki na mobile */
+    #diary-table th, #diary-table td,
+    #diary2-table th, #diary2-table td {
+      font-size: 10px !important;
+      padding: 2px !important;
+    }
+    #diary-table input, #diary-table textarea,
+    #diary2-table input, #diary2-table textarea {
+      font-size: 11px !important;
+      padding: 2px !important;
+    }
+    #diary-table th:first-child, #diary-table td:first-child,
+    #diary2-table th:first-child, #diary2-table td:first-child {
+      width: 40px !important;
+      min-width: 40px !important;
+      font-size: 10px !important;
+    }
+
     /* More button padding in content */
     input, textarea, select { font-size: 16px !important; } /* prevent zoom on iOS/Android */
+    #diary-table input, #diary-table textarea,
+    #diary2-table input, #diary2-table textarea { font-size: 11px !important; }
   }
 
   /* Desktop — hide mobile nav */
