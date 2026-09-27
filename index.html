@@ -13792,6 +13792,215 @@ var GodView = function GodView() {
   );
 };
 
+// ─── CHECK VIEW (tygodniowy tracker liczbowy: $, kg itp. + porównanie do poprzedniego tygodnia) ──
+var CHECK_CATS_KEY = 'check_cats';
+var CHECK_DEFAULT_CATS = [{id:'money', label:'$'}, {id:'weight', label:'kg'}];
+
+function loadCheckCats() {
+  try { var s = localStorage.getItem(CHECK_CATS_KEY); if (s) return JSON.parse(s); } catch(e) {}
+  return CHECK_DEFAULT_CATS;
+}
+function saveCheckCatsLocal(cats) {
+  try { localStorage.setItem(CHECK_CATS_KEY, JSON.stringify(cats)); } catch(e) {}
+}
+function saveCheckCats(cats) {
+  saveCheckCatsLocal(cats);
+  supabase.from('check_cats').upsert({ id: 'global', data: cats, updated_at: new Date().toISOString() }).then(function(res){
+    if (res && res.error) console.warn('[Check] Błąd zapisu kategorii do chmury (upewnij się, że w Supabase istnieje tabela check_cats z kolumnami id/data/updated_at):', res.error);
+  }).catch(function(e){ console.warn('[Check] Wyjątek przy zapisie kategorii:', e); });
+}
+function getCheckWeekKey(weekStart) {
+  return 'check_' + weekStart.toISOString().slice(0,10);
+}
+function emptyCheckWeek() {
+  return { values: {}, progress: '', toImprove: '' };
+}
+function loadCheckWeek(key) {
+  try { var s = localStorage.getItem(key); if (s) return JSON.parse(s); } catch(e) {}
+  return emptyCheckWeek();
+}
+function saveCheckWeekLocal(key, data) {
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+}
+function saveCheckWeek(key, data) {
+  saveCheckWeekLocal(key, data);
+  supabase.from('check_entries').upsert({ id: key, data: data, updated_at: new Date().toISOString() }).then(function(res){
+    if (res && res.error) console.warn('[Check] Błąd zapisu tygodnia do chmury (upewnij się, że w Supabase istnieje tabela check_entries z kolumnami id/data/updated_at):', res.error);
+  }).catch(function(e){ console.warn('[Check] Wyjątek przy zapisie tygodnia:', e); });
+}
+
+var CheckView = function CheckView() {
+  var _wo = React.useState(0), weekOffset = _wo[0], setWeekOffset = _wo[1];
+  var weekStart = getWeekStart(weekOffset);
+  var weekKey = getCheckWeekKey(weekStart);
+  var prevWeekKey = getCheckWeekKey(getWeekStart(weekOffset - 1));
+
+  var _cats = React.useState(function(){ return loadCheckCats(); }), cats = _cats[0], setCatsRaw = _cats[1];
+  var _wd = React.useState(function(){ return loadCheckWeek(weekKey); }), weekData = _wd[0], setWeekData = _wd[1];
+  var _pd = React.useState(function(){ return loadCheckWeek(prevWeekKey); }), prevData = _pd[0], setPrevData = _pd[1];
+  var _editMode = React.useState(false), editMode = _editMode[0], setEditMode = _editMode[1];
+  var _editingCat = React.useState(null), editingCat = _editingCat[0], setEditingCat = _editingCat[1];
+  var _editVal = React.useState(''), editVal = _editVal[0], setEditVal = _editVal[1];
+  var _newCat = React.useState(''), newCat = _newCat[0], setNewCat = _newCat[1];
+
+  React.useEffect(function() {
+    supabase.from('check_cats').select('*').eq('id','global').single().then(function(res){
+      if (res.data && res.data.data) {
+        setCatsRaw(res.data.data);
+        saveCheckCatsLocal(res.data.data);
+      }
+    });
+  }, []);
+
+  React.useEffect(function() {
+    var local = loadCheckWeek(weekKey);
+    setWeekData(local);
+    supabase.from('check_entries').select('*').eq('id', weekKey).single().then(function(res){
+      if (res.data && res.data.data) {
+        setWeekData(res.data.data);
+        saveCheckWeekLocal(weekKey, res.data.data);
+      }
+    });
+    var localPrev = loadCheckWeek(prevWeekKey);
+    setPrevData(localPrev);
+    supabase.from('check_entries').select('*').eq('id', prevWeekKey).single().then(function(res){
+      if (res.data && res.data.data) {
+        setPrevData(res.data.data);
+        saveCheckWeekLocal(prevWeekKey, res.data.data);
+      }
+    });
+  }, [weekOffset]);
+
+  function saveCats(next) {
+    setCatsRaw(next);
+    saveCheckCats(next);
+  }
+  function save(data) {
+    setWeekData(data);
+    saveCheckWeek(weekKey, data);
+  }
+  function setValue(catId, val) {
+    save(Object.assign({}, weekData, { values: Object.assign({}, weekData.values, _defineProperty({}, catId, val)) }));
+  }
+  function setProgress(val) { save(Object.assign({}, weekData, { progress: val })); }
+  function setToImprove(val) { save(Object.assign({}, weekData, { toImprove: val })); }
+  function renameCat(oldId, newLabel) {
+    var label = newLabel.trim();
+    if (!label) { setEditingCat(null); return; }
+    saveCats(cats.map(function(c){ return c.id===oldId ? Object.assign({}, c, {label:label}) : c; }));
+    setEditingCat(null);
+  }
+  function addCat() {
+    var label = newCat.trim();
+    if (!label) return;
+    saveCats(cats.concat([{ id:'c_'+Date.now(), label:label }]));
+    setNewCat('');
+  }
+  function removeCat(id) {
+    saveCats(cats.filter(function(c){ return c.id!==id; }));
+  }
+
+  var weekLabel = formatWeekLabel(weekStart);
+
+  return React.createElement('div', {className:'fade-in', style:{paddingBottom:40}},
+    React.createElement('div', {style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}},
+      React.createElement('div', {style:{display:'flex',alignItems:'center',gap:10}},
+        React.createElement('div', null,
+          React.createElement('h2', {style:{fontFamily:'Syne',fontSize:22,fontWeight:800,letterSpacing:'-0.02em'}}, '✅ Check'),
+          React.createElement('div', {style:{fontSize:12,color:'var(--muted)',marginTop:2}}, weekLabel)
+        ),
+        React.createElement('button', {
+          onClick:function(){ setEditMode(function(e){return !e;}); setEditingCat(null); },
+          title: editMode ? 'Zakończ edycję' : 'Edytuj kategorie',
+          style:{background: editMode?'rgba(245,158,11,0.18)':'var(--surface2)', border:'1px solid '+(editMode?'rgba(245,158,11,0.5)':'var(--border)'), borderRadius:8, color: editMode?'var(--gold)':'var(--muted)', cursor:'pointer', fontSize:15, padding:'6px 10px', lineHeight:1, minWidth:36, minHeight:36, display:'flex', alignItems:'center', justifyContent:'center'}
+        }, '✏️')
+      ),
+      React.createElement('div', {style:{display:'flex',gap:8,alignItems:'center'}},
+        React.createElement('button', {className:'btn btn-ghost', style:{padding:'6px 14px',fontSize:12}, onClick:function(){setWeekOffset(function(o){return o-1;});}}, '← Poprzedni'),
+        React.createElement('button', {className:'btn btn-ghost', style:{padding:'6px 14px',fontSize:12}, onClick:function(){setWeekOffset(function(o){return o+1;});}}, 'Następny →')
+      )
+    ),
+    React.createElement('div', {className:'card', style:{marginBottom:20}},
+      cats.length===0
+        ? React.createElement('div', {style:{textAlign:'center',padding:'20px',color:'var(--muted)',fontSize:13}}, editMode ? 'Brak kategorii — dodaj poniżej ↓' : 'Brak kategorii — kliknij ✏️ aby dodać')
+        : React.createElement('div', {style:{display:'flex',flexDirection:'column',gap:8}},
+            cats.map(function(cat) {
+              var curVal = weekData.values ? weekData.values[cat.id] : '';
+              var prevVal = prevData.values ? prevData.values[cat.id] : '';
+              var curNum = parseFloat(curVal);
+              var prevNum = parseFloat(prevVal);
+              var hasDelta = !isNaN(curNum) && !isNaN(prevNum);
+              var delta = hasDelta ? Math.round((curNum - prevNum) * 100) / 100 : null;
+              var isEditingThis = editingCat === cat.id;
+              return React.createElement('div', {key:cat.id, style:{display:'flex', alignItems:'center', gap:10, padding:'8px 10px', borderRadius:10, background:'var(--surface2)', border:'1px solid var(--border)', flexWrap:'wrap'}},
+                isEditingThis
+                  ? React.createElement('div', {style:{display:'flex',gap:4,alignItems:'center',minWidth:120}},
+                      React.createElement('input', {type:'text', value:editVal, autoFocus:true,
+                        onChange:function(e){setEditVal(e.target.value);},
+                        onKeyDown:function(e){ if(e.key==='Enter') renameCat(cat.id, editVal); if(e.key==='Escape') setEditingCat(null); },
+                        style:{fontSize:12,padding:'4px 6px',borderRadius:6,width:90,fontFamily:'Outfit',border:'1px solid var(--eng)',background:'var(--surface3)',color:'var(--text)',outline:'none'}
+                      }),
+                      React.createElement('button', {onClick:function(){renameCat(cat.id,editVal);}, style:{background:'var(--eng)',color:'#fff',border:'none',borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer'}}, '✓')
+                    )
+                  : React.createElement('div', {style:{minWidth:120, display:'flex', alignItems:'center', gap:4}},
+                      React.createElement('span', {style:{fontFamily:'Syne',fontWeight:700,fontSize:14,color:'var(--text)', cursor: editMode?'pointer':'default'},
+                        onClick: editMode ? function(){setEditingCat(cat.id);setEditVal(cat.label);} : undefined,
+                        title: editMode ? 'Kliknij aby zmienić nazwę' : undefined
+                      }, cat.label),
+                      editMode && React.createElement('button', {onClick:function(){ if(window.confirm('Usunąć kategorię "'+cat.label+'"?')) removeCat(cat.id); }, style:{background:'transparent',border:'none',color:'var(--math)',cursor:'pointer',fontSize:12,padding:'4px'}}, '🗑')
+                    ),
+                React.createElement('input', {
+                  type:'number', value: curVal===undefined?'':curVal,
+                  onChange:function(e){ setValue(cat.id, e.target.value); },
+                  placeholder:'wartość',
+                  style:{width:110, padding:'6px 8px', borderRadius:8, border:'1px solid var(--border)', background:'var(--surface3)', color:'var(--text)', fontSize:14, fontFamily:'JetBrains Mono', textAlign:'center'}
+                }),
+                React.createElement('div', {style:{flex:1, minWidth:8}}),
+                delta !== null
+                  ? React.createElement('span', {style:{
+                      fontFamily:'JetBrains Mono', fontSize:13, fontWeight:700,
+                      color: delta>0 ? 'var(--green)' : delta<0 ? 'var(--math)' : 'var(--muted)',
+                      background: delta>0 ? 'rgba(34,197,94,.12)' : delta<0 ? 'rgba(239,68,68,.12)' : 'rgba(255,255,255,.05)',
+                      padding:'3px 10px', borderRadius:8, whiteSpace:'nowrap'
+                    }}, (delta>0?'+':'')+delta+' vs poprz.')
+                  : React.createElement('span', {style:{fontSize:11,color:'var(--muted)'}}, 'brak poprz. tyg.')
+              );
+            })
+          ),
+      editMode && React.createElement('div', {style:{marginTop:14, display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}},
+        React.createElement('input', {type:'text', value:newCat, placeholder:'Nazwa nowej kategorii (np. km, stronic)…',
+          onChange:function(e){setNewCat(e.target.value);},
+          onKeyDown:function(e){ if(e.key==='Enter') addCat(); },
+          style:{maxWidth:220,fontSize:13}
+        }),
+        React.createElement('button', {className:'btn btn-primary', style:{fontSize:12,padding:'8px 14px'}, onClick:addCat}, '+ Dodaj kategorię')
+      )
+    ),
+    React.createElement('div', {className:'card', style:{marginBottom:16}},
+      React.createElement('div', {style:{fontSize:12,color:'var(--green)',fontWeight:700,marginBottom:8,fontFamily:'Syne',textTransform:'uppercase',letterSpacing:'.05em'}}, '📈 Progress'),
+      React.createElement('textarea', {
+        value: weekData.progress||'',
+        onChange:function(e){ autoGrowGodTextarea(e.target); setProgress(e.target.value); },
+        ref: autoGrowGodTextarea,
+        placeholder:'Co poszło dobrze w tym tygodniu…',
+        rows:5,
+        style:{width:'100%',minHeight:120,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:10,color:'var(--text)',fontSize:13,lineHeight:1.6,padding:'10px 12px',fontFamily:'Outfit',resize:'vertical',boxSizing:'border-box'}
+      })
+    ),
+    React.createElement('div', {className:'card'},
+      React.createElement('div', {style:{fontSize:12,color:'var(--math)',fontWeight:700,marginBottom:8,fontFamily:'Syne',textTransform:'uppercase',letterSpacing:'.05em'}}, '🔧 Do poprawy'),
+      React.createElement('textarea', {
+        value: weekData.toImprove||'',
+        onChange:function(e){ autoGrowGodTextarea(e.target); setToImprove(e.target.value); },
+        ref: autoGrowGodTextarea,
+        placeholder:'Co warto poprawić w następnym tygodniu…',
+        rows:5,
+        style:{width:'100%',minHeight:120,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:10,color:'var(--text)',fontSize:13,lineHeight:1.6,padding:'10px 12px',fontFamily:'Outfit',resize:'vertical',boxSizing:'border-box'}
+      })
+    )
+  );
+};
+
 
 function App() {
   var initState = function initState() {
@@ -14138,6 +14347,7 @@ function App() {
       })),
       /*#__PURE__*/React.createElement('div', {style: hide('diary')}, /*#__PURE__*/React.createElement(DiaryView, null), /*#__PURE__*/React.createElement(DiaryView2, null), /*#__PURE__*/React.createElement(ShopView, null)),
       /*#__PURE__*/React.createElement('div', {style: hide('god')}, /*#__PURE__*/React.createElement(GodView, null)),
+      /*#__PURE__*/React.createElement('div', {style: hide('check')}, /*#__PURE__*/React.createElement(CheckView, null)),
       /*#__PURE__*/React.createElement('div', {style: hide('math')}, state.subjects.math && /*#__PURE__*/React.createElement(MathView, {
         subject: state.subjects.math,
         onUpdate: updateSubject
@@ -14188,6 +14398,10 @@ function App() {
     id: 'god',
     label: 'God',
     icon: 'timer'
+  }, {
+    id: 'check',
+    label: 'Check',
+    icon: 'check'
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -14264,7 +14478,15 @@ function App() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "book",
     size: 15
-  }), "Dziennik")), /*#__PURE__*/React.createElement("div", {
+  }), "Dziennik"), /*#__PURE__*/React.createElement("button", {
+    className: "sidebar-item ".concat(view === 'check' ? 'active' : ''),
+    onClick: function onClick() {
+      return setView('check');
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "check",
+    size: 15
+  }), "Check")), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1
     }
