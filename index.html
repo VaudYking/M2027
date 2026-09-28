@@ -13792,7 +13792,26 @@ var GodView = function GodView() {
   );
 };
 
-// ─── CHECK VIEW (tygodniowy tracker liczbowy: $, kg itp. + porównanie do poprzedniego tygodnia) ──
+// ─── CHECK VIEW (tygodniowy tracker liczbowy: $, kg itp. + porównanie do poprzedniego tygodnia + zdjęcie dnia) ──
+// Tydzień w Check liczy się od NIEDZIELI (nie od poniedziałku jak w Dzienniku) — celowo osobna
+// funkcja od getWeekStart(), żeby nie ruszać Dziennika/Dziennika 2/Trackera.
+function getCheckWeekStart(offset) {
+  var now = new Date();
+  var day = now.getDay(); // 0=Nd,1=Pon...6=Sob
+  var mon = new Date(now);
+  mon.setHours(0, 0, 0, 0);
+  mon.setDate(mon.getDate() - day + offset * 7);
+  return mon;
+}
+function formatCheckWeekLabel(weekStart) {
+  var end = new Date(weekStart);
+  end.setDate(end.getDate() + 6);
+  var fmt = function (d) {
+    return "".concat(d.getDate(), " ").concat(['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'][d.getMonth()]);
+  };
+  return "".concat(fmt(weekStart), " \u2013 ").concat(fmt(end), " ").concat(end.getFullYear());
+}
+
 var CHECK_CATS_KEY = 'check_cats';
 var CHECK_DEFAULT_CATS = [{id:'money', label:'$'}, {id:'weight', label:'kg'}];
 
@@ -13829,11 +13848,151 @@ function saveCheckWeek(key, data) {
   }).catch(function(e){ console.warn('[Check] Wyjątek przy zapisie tygodnia:', e); });
 }
 
+// ── ZDJĘCIE DNIA ──────────────────────────────────────────────────────────
+// Zdjęcia lądują w Supabase Storage (ten sam duży bucket STORAGE_BUCKET co reszta
+// apki), NIE w kolumnie JSONB app_state — dzięki temu nie ma ryzyka powtórki starego
+// błędu (base64 rozdymające bazę i zawieszające sync). W localStorage trzymamy
+// tylko sam URL (kilkadziesiąt bajtów), więc czyszczenie danych przeglądarki nie
+// zeruje reszty apki, a po ponownym wejściu URL i tak doczyta się z Supabase.
+function getCheckDayKey(date) {
+  var y = date.getFullYear();
+  var m = String(date.getMonth() + 1).padStart(2, '0');
+  var d = String(date.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+function loadCheckPhotoLocal(dayKey) {
+  try { return localStorage.getItem('check_photo_' + dayKey) || null; } catch(e) { return null; }
+}
+function saveCheckPhotoLocal(dayKey, url) {
+  try { localStorage.setItem('check_photo_' + dayKey, url); } catch(e) {}
+}
+// Własny, niezależny upload do Storage — celowo NIE używa współdzielonych zmiennych
+// globalnych (_uploadedImageMap/_imageUploadFailed) używanych przez główny sync stanu
+// apki, żeby zdjęcie dnia nigdy nie kolidowało z zapisem Dziennika/Sekcji w tle.
+function uploadCheckPhotoToStorage(base64DataUrl, dayKey) {
+  var ext = base64DataUrl.indexOf('png') !== -1 ? 'png' : 'jpg';
+  var fileName = 'check-photos/' + dayKey + '.' + ext;
+  var blob = dataUrlToBlob(base64DataUrl);
+  function attempt(n) {
+    return supabase.storage.from(STORAGE_BUCKET).upload(fileName, blob, { upsert: true, contentType: blob.type }).then(function (up) {
+      if (up.data) {
+        var pub = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
+        return pub.data.publicUrl;
+      }
+      if (n < 3) return _sleep(n * 1500).then(function () { return attempt(n + 1); });
+      throw (up.error || new Error('Upload nieudany'));
+    }).catch(function (e) {
+      if (n < 3) return _sleep(n * 1500).then(function () { return attempt(n + 1); });
+      throw e;
+    });
+  }
+  return attempt(1);
+}
+function addCheckPhoto(dataUrl, dayKey, onDone) {
+  compressImage(dataUrl, 1600, 0.82).then(function (compressed) {
+    return uploadCheckPhotoToStorage(compressed, dayKey);
+  }).then(function (url) {
+    saveCheckPhotoLocal(dayKey, url);
+    supabase.from('check_photos').upsert({ id: dayKey, url: url, created_at: new Date().toISOString() }).then(function (res) {
+      if (res && res.error) console.warn('[Check] Błąd zapisu zdjęcia do bazy (upewnij się, że w Supabase istnieje tabela check_photos z kolumnami id/url/created_at):', res.error);
+    }).catch(function (e) { console.warn('[Check] Wyjątek przy zapisie zdjęcia:', e); });
+    if (onDone) onDone(url, null);
+  }).catch(function (e) {
+    console.warn('[Check] Upload zdjęcia nieudany:', e);
+    if (onDone) onDone(null, e);
+  });
+}
+
+var CheckDayPhoto = function CheckDayPhoto() {
+  var _do = React.useState(0), dayOffset = _do[0], setDayOffset = _do[1];
+  var dayDate = (function () { var d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + dayOffset); return d; })();
+  var dayKey = getCheckDayKey(dayDate);
+  var _url = React.useState(function () { return loadCheckPhotoLocal(dayKey); }), photoUrl = _url[0], setPhotoUrl = _url[1];
+  var _up = React.useState(false), uploading = _up[0], setUploading = _up[1];
+  var _err = React.useState(null), err = _err[0], setErr = _err[1];
+  var _lb = React.useState(false), lightbox = _lb[0], setLightbox = _lb[1];
+  var galleryRef = React.useRef();
+  var cameraRef = React.useRef();
+
+  React.useEffect(function () {
+    var local = loadCheckPhotoLocal(dayKey);
+    setPhotoUrl(local);
+    setErr(null);
+    supabase.from('check_photos').select('*').eq('id', dayKey).single().then(function (res) {
+      if (res.data && res.data.url) {
+        setPhotoUrl(res.data.url);
+        saveCheckPhotoLocal(dayKey, res.data.url);
+      }
+    });
+  }, [dayOffset]);
+
+  function handleFile(e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      setUploading(true);
+      setErr(null);
+      addCheckPhoto(ev.target.result, dayKey, function (url, error) {
+        setUploading(false);
+        if (url) setPhotoUrl(url);
+        if (error) setErr('Nie udało się wgrać zdjęcia — sprawdź połączenie i spróbuj ponownie.');
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  var isToday = dayOffset === 0;
+  var dayLabelFull = dayDate.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  return React.createElement('div', { className: 'card', style: { marginTop: 16 } },
+    lightbox && photoUrl && React.createElement(ImageLightbox, { src: photoUrl, onClose: function () { setLightbox(false); } }),
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 } },
+      React.createElement('div', { style: { fontSize: 12, color: 'var(--eng)', fontWeight: 700, fontFamily: 'Syne', textTransform: 'uppercase', letterSpacing: '.05em' } }, '📸 Zdjęcie dnia'),
+      React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        React.createElement('button', { className: 'btn btn-ghost', style: { padding: '5px 10px', fontSize: 11 }, onClick: function () { setDayOffset(function (o) { return o - 1; }); } }, '←'),
+        React.createElement('span', { style: { fontSize: 12, color: 'var(--muted)', minWidth: 150, textAlign: 'center', textTransform: 'capitalize' } }, isToday ? 'Dziś, ' + dayLabelFull.split(', ')[1] : dayLabelFull),
+        React.createElement('button', { className: 'btn btn-ghost', style: { padding: '5px 10px', fontSize: 11 }, disabled: isToday, onClick: function () { setDayOffset(function (o) { return o + 1; }); } }, '→')
+      )
+    ),
+    err && React.createElement('div', { style: { fontSize: 12, color: 'var(--math)', marginBottom: 10, background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.25)', borderRadius: 8, padding: '8px 10px' } }, err),
+    photoUrl
+      ? React.createElement('div', null,
+          React.createElement('img', {
+            src: photoUrl,
+            alt: 'Zdjęcie dnia ' + dayKey,
+            onClick: function () { setLightbox(true); },
+            style: { width: '100%', maxHeight: 460, objectFit: 'cover', borderRadius: 14, display: 'block', cursor: 'zoom-in', border: '1px solid var(--border)' }
+          }),
+          React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 10 } },
+            React.createElement('button', {
+              className: 'btn btn-ghost', style: { fontSize: 12 },
+              onClick: function (event) { return createAttachMenu(galleryRef.current, cameraRef.current, event && event.currentTarget ? event.currentTarget : galleryRef.current); }
+            }, uploading ? '⏳ Wgrywanie…' : '🔄 Zmień zdjęcie')
+          )
+        )
+      : React.createElement('div', {
+          onClick: function (event) { if (!uploading) createAttachMenu(galleryRef.current, cameraRef.current, event && event.currentTarget ? event.currentTarget : galleryRef.current); },
+          style: {
+            width: '100%', minHeight: 200, borderRadius: 14, border: '2px dashed var(--border)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            cursor: uploading ? 'default' : 'pointer', background: 'var(--surface2)', color: 'var(--muted)', gap: 8
+          }
+        },
+          React.createElement('div', { style: { fontSize: 36 } }, uploading ? '⏳' : '📷'),
+          React.createElement('div', { style: { fontSize: 13 } }, uploading ? 'Wgrywanie zdjęcia…' : 'Dodaj zdjęcie — aparat lub galeria')
+        ),
+    React.createElement('input', { ref: galleryRef, type: 'file', accept: 'image/*', style: { display: 'none' }, onChange: handleFile }),
+    React.createElement('input', { ref: cameraRef, type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' }, onChange: handleFile })
+  );
+};
+
 var CheckView = function CheckView() {
   var _wo = React.useState(0), weekOffset = _wo[0], setWeekOffset = _wo[1];
-  var weekStart = getWeekStart(weekOffset);
+  var weekStart = getCheckWeekStart(weekOffset);
   var weekKey = getCheckWeekKey(weekStart);
-  var prevWeekKey = getCheckWeekKey(getWeekStart(weekOffset - 1));
+  var prevWeekKey = getCheckWeekKey(getCheckWeekStart(weekOffset - 1));
 
   var _cats = React.useState(function(){ return loadCheckCats(); }), cats = _cats[0], setCatsRaw = _cats[1];
   var _wd = React.useState(function(){ return loadCheckWeek(weekKey); }), weekData = _wd[0], setWeekData = _wd[1];
@@ -13900,14 +14059,14 @@ var CheckView = function CheckView() {
     saveCats(cats.filter(function(c){ return c.id!==id; }));
   }
 
-  var weekLabel = formatWeekLabel(weekStart);
+  var weekLabel = formatCheckWeekLabel(weekStart);
 
   return React.createElement('div', {className:'fade-in', style:{paddingBottom:40}},
     React.createElement('div', {style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}},
       React.createElement('div', {style:{display:'flex',alignItems:'center',gap:10}},
         React.createElement('div', null,
           React.createElement('h2', {style:{fontFamily:'Syne',fontSize:22,fontWeight:800,letterSpacing:'-0.02em'}}, '✅ Check'),
-          React.createElement('div', {style:{fontSize:12,color:'var(--muted)',marginTop:2}}, weekLabel)
+          React.createElement('div', {style:{fontSize:12,color:'var(--muted)',marginTop:2}}, weekLabel + ' (niedziela – sobota)')
         ),
         React.createElement('button', {
           onClick:function(){ setEditMode(function(e){return !e;}); setEditingCat(null); },
@@ -13997,7 +14156,8 @@ var CheckView = function CheckView() {
         rows:5,
         style:{width:'100%',minHeight:120,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:10,color:'var(--text)',fontSize:13,lineHeight:1.6,padding:'10px 12px',fontFamily:'Outfit',resize:'vertical',boxSizing:'border-box'}
       })
-    )
+    ),
+    React.createElement(CheckDayPhoto, null)
   );
 };
 
