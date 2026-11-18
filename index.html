@@ -14347,7 +14347,7 @@ function App() {
   }, []);
   // Worker żyje przez cały czas działania apki – nie resetuje się przy zmianie zakładki
   var globalWorkerRef = useRef(null);
-  useEffect(function () { window.M2027_view = view; window.dispatchEvent(new Event('m2027view')); }, [view]);
+  useEffect(function () { window.M2027_view = view; window.M2027_goto = setView; window.dispatchEvent(new Event('m2027view')); }, [view]);
   useEffect(function () {
     globalWorkerRef.current = createWorker();
     return function () {
@@ -14478,7 +14478,7 @@ function App() {
     id: 'god',
     label: 'God',
     icon: 'timer'
-  }, {id: 'lock', label: 'Hasło', icon: 'alert'}];
+  }, {id: 'lock', label: 'PIN', icon: 'alert'}];
   var diaryNavItem = {
     id: 'diary',
     label: 'Dziennik',
@@ -14563,7 +14563,7 @@ function App() {
     id: 'check',
     label: 'Check',
     icon: 'check'
-  }, {id: 'lock', label: 'Hasło', icon: 'alert'}];
+  }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -14818,10 +14818,11 @@ function createAttachMenu(galleryInput, cameraInput, anchorEl) {
 }
 
 (function(){
-var h=React.createElement,KEY='m2027_lock_v1',UNTIL='m2027_unlock_until',SESS='m2027_unlocked_session',ATT='m2027_lock_att';
+var h=React.createElement,KEY='m2027_lock_v2',LSEEN='m2027_last_seen',FLAG='m2027_unlocked_flag',ATT='m2027_lock_att';
 var VIEWS=[['dashboard','Dashboard'],['math','Matematyka'],['polish','Polski'],['english','Angielski'],['tracker','Tracker'],['chat','Czat'],['diary','Dziennik'],['god','God'],['check','Check']];
-var DEF={enabled:false,salt:'',hash:'',scope:'all',views:['diary','check'],mode:'session',durMin:480,idleMin:0,quietOn:false,quietFrom:'22:00',quietTo:'07:00'};
-var cfg=load(),mem=false,lastAct=Date.now(),listeners=[],lastState=null;
+var GRACE=[[0,'Przy każdym otwarciu apki'],[1,'1 minuta'],[2,'2 minuty'],[5,'5 minut'],[10,'10 minut'],[15,'15 minut'],[30,'30 minut'],[60,'1 godzina'],[480,'8 godzin'],[1440,'1 dzień'],[10080,'7 dni'],[43200,'30 dni']];
+var DEF={enabled:false,salt:'',hash:'',pinLen:4,scope:'all',views:['diary','check'],graceMin:5,quietOn:false,quietFrom:'22:00',quietTo:'07:00'};
+var cfg=load(),mem=false,listeners=[],lastState=null,lastTouch=0;
 function load(){try{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s)return Object.assign({},DEF,s);}catch(e){}return Object.assign({},DEF);}
 function emit(){listeners.forEach(function(f){f();});}
 function save(c){cfg=c;try{localStorage.setItem(KEY,JSON.stringify(c));}catch(e){}emit();}
@@ -14833,82 +14834,110 @@ function hash(pw,salt){var d=salt+'::'+pw;
 function newSalt(){var a=new Uint8Array(16);crypto.getRandomValues(a);return hex(a);}
 function mins(t){var p=(t||'0:0').split(':');return (+p[0])*60+(+p[1]);}
 function quiet(){if(!cfg.enabled||!cfg.quietOn)return false;var n=new Date(),m=n.getHours()*60+n.getMinutes(),f=mins(cfg.quietFrom),t=mins(cfg.quietTo);return f<=t?(m>=f&&m<t):(m>=f||m<t);}
+function touch(){try{localStorage.setItem(LSEEN,String(Date.now()));}catch(e){}}
 function unlocked(){if(!cfg.enabled)return true;if(quiet())return false;
- try{if(cfg.mode==='launch')return mem;
-  if(cfg.mode==='session')return sessionStorage.getItem(SESS)==='1';
-  return Date.now()<(parseInt(localStorage.getItem(UNTIL))||0);}catch(e){return mem;}}
-function markUnlocked(){mem=true;lastAct=Date.now();
- try{if(cfg.mode==='session')sessionStorage.setItem(SESS,'1');if(cfg.mode==='duration')localStorage.setItem(UNTIL,String(Date.now()+cfg.durMin*60000));}catch(e){}emit();}
-function lockNow(){mem=false;try{sessionStorage.removeItem(SESS);localStorage.removeItem(UNTIL);}catch(e){}emit();}
+ if(!(cfg.graceMin>0))return mem;
+ try{if(localStorage.getItem(FLAG)!=='1')return false;
+  return Date.now()-(parseInt(localStorage.getItem(LSEEN))||0)<=cfg.graceMin*60000;}catch(e){return mem;}}
+function markUnlocked(){mem=true;try{if(cfg.graceMin>0){localStorage.setItem(FLAG,'1');touch();}}catch(e){}lastState=unlocked();emit();}
+function lockNow(){mem=false;try{localStorage.removeItem(FLAG);}catch(e){}lastState=unlocked();emit();}
 function viewLocked(v){if(!cfg.enabled||unlocked())return false;return v==='lock'||cfg.scope==='all'||cfg.views.indexOf(v)!==-1;}
 window.M2027Lock={viewLocked:viewLocked};
 function att(){try{return JSON.parse(localStorage.getItem(ATT)||'{"n":0,"until":0}');}catch(e){return {n:0,until:0};}}
 function setAtt(a){try{localStorage.setItem(ATT,JSON.stringify(a));}catch(e){}}
 
-['mousemove','keydown','touchstart','click'].forEach(function(e){window.addEventListener(e,function(){lastAct=Date.now();},{passive:true});});
-function tick(){if(!cfg.enabled)return;
- if(cfg.idleMin>0&&unlocked()&&Date.now()-lastAct>cfg.idleMin*60000)lockNow();
- var u=unlocked();if(u!==lastState){lastState=u;emit();}}
-setInterval(tick,10000);document.addEventListener('visibilitychange',tick);
+// aktywność użytkownika odświeża licznik bezczynności (tylko gdy apka jest odblokowana)
+function act(){var n=Date.now();if(n-lastTouch<3000)return;lastTouch=n;if(cfg.enabled&&cfg.graceMin>0&&unlocked())touch();}
+['mousemove','mousedown','keydown','touchstart','touchmove','click','scroll','wheel'].forEach(function(e){window.addEventListener(e,act,{passive:true,capture:true});});
+function tick(){if(!cfg.enabled)return;var u=unlocked();if(u!==lastState){lastState=u;emit();}}
+setInterval(tick,5000);document.addEventListener('visibilitychange',tick);window.addEventListener('focus',tick);window.addEventListener('pageshow',tick);
 
 var st=document.createElement('style');
-st.textContent='.m2027-full{position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px}'+
+st.textContent='.m2027-full{position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}'+
 '.m2027-panel{position:fixed;top:0;right:0;bottom:0;left:240px;z-index:90;background:var(--bg);overflow:auto;padding:32px 28px}'+
-'@media(max-width:768px){.m2027-panel{left:0;bottom:62px;padding:16px 14px}}'+
-'.m2027-panel input[type=checkbox],.m2027-panel input[type=radio]{width:18px;height:18px;padding:0}';
+'.m2027-gear{position:fixed;top:10px;right:12px;z-index:80;width:34px;height:34px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:15px;display:none;align-items:center;justify-content:center;cursor:pointer;opacity:.75}'+
+'.m2027-back{display:none;margin-bottom:12px}'+
+'@media(max-width:768px){.m2027-panel{left:0;bottom:62px;padding:16px 14px}.m2027-gear{display:flex}.m2027-back{display:inline-flex}}';
 document.head.appendChild(st);
 
+function Keypad(p){var keys=['1','2','3','4','5','6','7','8','9','C','0','⌫'];
+ return h('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,maxWidth:300,margin:'0 auto'}},keys.map(function(k){
+  return h('button',{key:k,type:'button',onClick:function(){k==='⌫'?p.onDel():k==='C'?p.onClear():p.onDigit(k);},
+   style:{height:p.small?56:68,fontSize:k==='C'?16:26,fontFamily:'JetBrains Mono',fontWeight:600,borderRadius:16,border:'1px solid var(--border)',background:'var(--surface2)',color:k==='C'||k==='⌫'?'var(--muted)':'var(--text)',cursor:'pointer',touchAction:'manipulation',userSelect:'none',WebkitTapHighlightColor:'transparent'}},k);}));}
+function Dots(len,n,active,onClick){var d=[];for(var i=0;i<len;i++)d.push(h('span',{key:i,style:{width:14,height:14,borderRadius:'50%',border:'2px solid '+(i<n?'var(--eng)':'var(--border)'),background:i<n?'var(--eng)':'transparent',transition:'all .1s'}}));
+ return h('div',{onClick:onClick,style:{display:'flex',justifyContent:'center',gap:12,padding:'12px 10px',borderRadius:12,border:'1px solid '+(active?'var(--eng)':'var(--border)'),background:active?'var(--eng-glow)':'var(--surface2)',cursor:onClick?'pointer':'default'}},d);}
+function useKeys(press,del){var r=React.useRef();r.current={press:press,del:del};
+ React.useEffect(function(){var f=function(e){if(/^[0-9]$/.test(e.key))r.current.press(e.key);else if(e.key==='Backspace')r.current.del();};window.addEventListener('keydown',f);return function(){window.removeEventListener('keydown',f);};},[]);}
+
 function Form(){
- var a=React.useState(''),pw=a[0],setPw=a[1],b=React.useState(''),err=b[0],setErr=b[1],c=React.useState(0),bump=c[1];
+ var a=React.useState(''),pin=a[0],setPin=a[1],b=React.useState(''),err=b[0],setErr=b[1],c=React.useState(0),bump=c[1];
+ var pr=React.useRef(''),busy=React.useRef(false),L=cfg.pinLen||4;
  React.useEffect(function(){var i=setInterval(function(){bump(function(x){return x+1;});},1000);return function(){clearInterval(i);};},[]);
- var at=att(),wait=Math.max(0,Math.ceil((at.until-Date.now())/1000)),q=quiet();
- function go(){if(wait>0||q||!pw)return;
-  hash(pw,cfg.salt).then(function(x){
-   if(x===cfg.hash){setAtt({n:0,until:0});markUnlocked();}
-   else{var n=att().n+1;setAtt({n:n,until:n>=5?Date.now()+Math.min(300,30*(n-4))*1000:0});setErr('Złe hasło');setPw('');}});}
+ function waitSec(){return Math.max(0,Math.ceil((att().until-Date.now())/1000));}
+ function setP(v){pr.current=v;setPin(v);}
+ function check(v){busy.current=true;
+  hash(v,cfg.salt).then(function(x){busy.current=false;
+   if(x===cfg.hash){setAtt({n:0,until:0});setP('');markUnlocked();}
+   else{var n=att().n+1;setAtt({n:n,until:n>=5?Date.now()+Math.min(300,30*(n-4))*1000:0});setErr('Zły PIN');setP('');try{navigator.vibrate&&navigator.vibrate(200);}catch(e){}}});}
+ function press(d){if(busy.current||quiet()||waitSec()>0||pr.current.length>=L)return;setErr('');var v=pr.current+d;setP(v);if(v.length===L)check(v);}
+ function del(){if(busy.current)return;setP(pr.current.slice(0,-1));}
+ useKeys(press,del);
+ var w=waitSec(),q=quiet();
  return h('div',{className:'card',style:{maxWidth:340,width:'100%',textAlign:'center'}},
-  h('div',{style:{fontSize:40}},'🔒'),
-  h('h2',{style:{fontFamily:'Syne',margin:'8px 0 16px'}},'M2027'),
+  h('div',{style:{fontSize:36}},'🔒'),
+  h('h2',{style:{fontFamily:'Syne',margin:'6px 0 14px'}},'M2027'),
   q?h('p',{style:{color:'var(--math)',fontSize:13}},'Dostęp zablokowany do '+cfg.quietTo+'.'):
-  h('div',null,
-   h('input',{type:'password',autoFocus:true,value:pw,placeholder:'Hasło',onChange:function(e){setPw(e.target.value);setErr('');},onKeyDown:function(e){if(e.key==='Enter')go();},style:{textAlign:'center',marginBottom:10}}),
-   h('button',{className:'btn btn-primary',style:{width:'100%'},onClick:go},'Odblokuj'),
-   err&&h('p',{style:{color:'var(--math)',fontSize:12,marginTop:10}},err),
-   wait>0&&h('p',{style:{color:'var(--gold)',fontSize:12,marginTop:6}},'Zbyt wiele prób. Poczekaj '+wait+' s.')));}
+  h('div',null,Dots(L,pin.length,false),
+   h('div',{style:{minHeight:22,margin:'8px 0',fontSize:12,color:w>0?'var(--gold)':'var(--math)'}},w>0?'Zbyt wiele prób. Poczekaj '+w+' s.':err),
+   h(Keypad,{onDigit:press,onDel:del,onClear:function(){setP('');}})));}
 
 function Settings(){
- var s0=React.useState({o:'',n1:'',n2:'',msg:null}),s=s0[0],set=s0[1];
- function M(t,ok){set(Object.assign({},s,{msg:{t:t,ok:!!ok}}));}
+ function init(){return {o:'',n1:'',n2:'',act:cfg.hash?'o':'n1',len:cfg.pinLen||4,msg:null};}
+ var s0=React.useState(init),s=s0[0],set=s0[1];
+ function lenFor(f,p){return f==='o'?(cfg.pinLen||4):p.len;}
+ function M(t,ok){set(function(p){return Object.assign({},p,{msg:{t:t,ok:!!ok}});});}
+ function press(d){set(function(p){var f=p.act,mx=lenFor(f,p);if(p[f].length>=mx)return p;var v=p[f]+d,n=Object.assign({},p,{msg:null});n[f]=v;if(v.length===mx)n.act=f==='o'?'n1':'n2';return n;});}
+ function del(){set(function(p){var n=Object.assign({},p);n[p.act]=p[p.act].slice(0,-1);return n;});}
+ function clr(){set(function(p){var n=Object.assign({},p);n[p.act]='';return n;});}
+ useKeys(press,del);
  function upd(p){save(Object.assign({},cfg,p));markUnlocked();}
  function setPass(){
-  if(s.n1.length<4)return M('Hasło min. 4 znaki');
-  if(s.n1!==s.n2)return M('Hasła się różnią');
-  function go(){var sl=newSalt();hash(s.n1,sl).then(function(x){save(Object.assign({},cfg,{salt:sl,hash:x,enabled:true}));markUnlocked();set({o:'',n1:'',n2:'',msg:{t:'Hasło zapisane, blokada włączona.',ok:true}});});}
-  if(cfg.hash)hash(s.o,cfg.salt).then(function(x){x===cfg.hash?go():M('Stare hasło jest złe');});else go();}
+  if(s.n1.length!==s.len)return M('Nowy PIN musi mieć '+s.len+' cyfr');
+  if(s.n1!==s.n2)return M('PIN-y się różnią');
+  function go(){var sl=newSalt();hash(s.n1,sl).then(function(x){save(Object.assign({},cfg,{salt:sl,hash:x,pinLen:s.len,enabled:true}));markUnlocked();set(Object.assign(init(),{msg:{t:'PIN zapisany, blokada włączona.',ok:true}}));});}
+  if(cfg.hash)hash(s.o,cfg.salt).then(function(x){x===cfg.hash?go():M('Stary PIN jest zły');});else go();}
  function card(t,kids){return h('div',{className:'card',style:{marginBottom:14}},h('h3',{style:{fontFamily:'Syne',fontSize:15,marginBottom:10}},t),kids);}
- function lab(t){return h('div',{style:{fontSize:12,color:'var(--muted)',margin:'8px 0 4px'}},t);}
+ function lab(t){return h('div',{style:{fontSize:12,color:'var(--muted)',margin:'10px 0 4px'}},t);}
  function sel(val,opts,on){return h('select',{value:val,onChange:function(e){on(e.target.value);}},opts.map(function(o){return h('option',{key:o[0],value:o[0]},o[1]);}));}
- function inp(k,ph){return h('input',{type:'password',placeholder:ph,value:s[k],onChange:function(e){var p={};p[k]=e.target.value;set(Object.assign({},s,p));},style:{marginBottom:8}});}
+ function field(f,title){return h('div',{key:f},lab(title),Dots(lenFor(f,s),s[f].length,s.act===f,function(){set(function(p){return Object.assign({},p,{act:f});});}));}
+ var gm=cfg.graceMin,preset=GRACE.some(function(g){return g[0]===gm;});
+ var chk={width:18,height:18,padding:0,flexShrink:0};
  return h('div',{style:{maxWidth:560,margin:'0 auto'}},
-  h('h2',{style:{fontFamily:'Syne',fontSize:22,marginBottom:16}},'🔒 Hasło i blokada'),
+  h('button',{className:'btn btn-ghost m2027-back',onClick:function(){window.M2027_goto&&window.M2027_goto('dashboard');}},'← Wróć'),
+  h('h2',{style:{fontFamily:'Syne',fontSize:22,marginBottom:16}},'🔒 PIN i blokada'),
   s.msg&&h('div',{style:{padding:'10px 14px',borderRadius:10,marginBottom:14,fontSize:13,background:s.msg.ok?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:s.msg.ok?'#4ade80':'#f87171'}},s.msg.t),
   card('Blokada',h('div',null,
    h('p',{style:{fontSize:13,color:'var(--muted)',marginBottom:10}},cfg.enabled?'Włączona':'Wyłączona'),
    h('div',{style:{display:'flex',gap:8}},
-    h('button',{className:'btn '+(cfg.enabled?'btn-danger':'btn-primary'),onClick:function(){if(!cfg.hash)return M('Najpierw ustaw hasło poniżej');upd({enabled:!cfg.enabled});}},cfg.enabled?'Wyłącz blokadę':'Włącz blokadę'),
+    h('button',{className:'btn '+(cfg.enabled?'btn-danger':'btn-primary'),onClick:function(){if(!cfg.hash)return M('Najpierw ustaw PIN poniżej');upd({enabled:!cfg.enabled});}},cfg.enabled?'Wyłącz blokadę':'Włącz blokadę'),
     cfg.enabled&&h('button',{className:'btn btn-ghost',onClick:lockNow},'Zablokuj teraz')))),
-  card(cfg.hash?'Zmień hasło':'Ustaw hasło',h('div',null,cfg.hash&&inp('o','Stare hasło'),inp('n1','Nowe hasło (min. 4 znaki)'),inp('n2','Powtórz nowe hasło'),h('button',{className:'btn btn-primary',onClick:setPass},'Zapisz hasło'))),
+  card('Blokuj po bezczynności',h('div',null,
+   h('p',{style:{fontSize:12,color:'var(--muted)',marginBottom:8,lineHeight:1.5}},'Liczy się od ostatniego użycia apki. Jeśli zamkniesz i otworzysz apkę albo zmienisz kartę w tym czasie, PIN nie jest potrzebny.'),
+   sel(preset?String(gm):'custom',GRACE.map(function(g){return [String(g[0]),g[1]];}).concat([['custom','Własny czas…']]),function(v){if(v!=='custom')upd({graceMin:+v});else upd({graceMin:gm>0?gm:3});}),
+   lab('Dokładnie (w minutach, 0 = przy każdym otwarciu)'),
+   h('input',{type:'number',min:0,max:100000,value:gm,onChange:function(e){var v=parseInt(e.target.value);upd({graceMin:isNaN(v)||v<0?0:v});}}))),
+  card(cfg.hash?'Zmień PIN':'Ustaw PIN',h('div',null,
+   lab('Długość PIN-u'),sel(String(s.len),[['4','4 cyfry'],['5','5 cyfr'],['6','6 cyfr'],['8','8 cyfr']],function(v){set(function(p){return Object.assign({},p,{len:+v,n1:'',n2:'',act:'n1'});});}),
+   cfg.hash&&field('o','Stary PIN'),field('n1','Nowy PIN'),field('n2','Powtórz nowy PIN'),
+   h('div',{style:{margin:'14px 0'}},h(Keypad,{small:true,onDigit:press,onDel:del,onClear:clr})),
+   h('button',{className:'btn btn-primary',style:{width:'100%'},onClick:setPass},'Zapisz PIN'))),
   card('Zakres',h('div',null,
-   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:6}},h('input',{type:'radio',checked:cfg.scope==='all',onChange:function(){upd({scope:'all'});}}),'Cała apka'),
-   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:6}},h('input',{type:'radio',checked:cfg.scope==='selected',onChange:function(){upd({scope:'selected'});}}),'Tylko wybrane zakładki'),
+   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:8}},h('input',{type:'radio',style:chk,checked:cfg.scope==='all',onChange:function(){upd({scope:'all'});}}),'Cała apka'),
+   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:8}},h('input',{type:'radio',style:chk,checked:cfg.scope==='selected',onChange:function(){upd({scope:'selected'});}}),'Tylko wybrane zakładki'),
    cfg.scope==='selected'&&h('div',{style:{marginLeft:26}},VIEWS.map(function(v){var on=cfg.views.indexOf(v[0])!==-1;
-    return h('label',{key:v[0],style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:4}},h('input',{type:'checkbox',checked:on,onChange:function(){upd({views:on?cfg.views.filter(function(x){return x!==v[0];}):cfg.views.concat([v[0]])});}}),v[1]);})))),
-  card('Kiedy odblokowane',h('div',null,
-   lab('Tryb'),sel(cfg.mode,[['launch','Pytaj przy każdym otwarciu apki'],['session','Do zamknięcia karty / apki'],['duration','Zapamiętaj na tym urządzeniu przez czas']],function(v){upd({mode:v});}),
-   cfg.mode==='duration'&&h('div',null,lab('Czas pamiętania'),sel(String(cfg.durMin),[['15','15 minut'],['60','1 godzina'],['480','8 godzin'],['1440','1 dzień'],['10080','7 dni'],['43200','30 dni']],function(v){upd({durMin:+v});})),
-   lab('Auto-blokada po bezczynności'),sel(String(cfg.idleMin),[['0','Wyłączona'],['5','5 minut'],['15','15 minut'],['30','30 minut'],['60','60 minut']],function(v){upd({idleMin:+v});}))),
+    return h('label',{key:v[0],style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:6}},h('input',{type:'checkbox',style:chk,checked:on,onChange:function(){upd({views:on?cfg.views.filter(function(x){return x!==v[0];}):cfg.views.concat([v[0]])});}}),v[1]);})))),
   card('Godziny blokady',h('div',null,
-   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13}},h('input',{type:'checkbox',checked:cfg.quietOn,onChange:function(){upd({quietOn:!cfg.quietOn});}}),'W tych godzinach nic nie odblokuje (nawet dobre hasło)'),
+   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13}},h('input',{type:'checkbox',style:chk,checked:cfg.quietOn,onChange:function(){upd({quietOn:!cfg.quietOn});}}),'W tych godzinach nic nie odblokuje (nawet dobry PIN)'),
    cfg.quietOn&&h('div',{style:{display:'flex',gap:8,marginTop:8}},h('input',{type:'time',value:cfg.quietFrom,onChange:function(e){upd({quietFrom:e.target.value});}}),h('input',{type:'time',value:cfg.quietTo,onChange:function(e){upd({quietTo:e.target.value});}})))),
   h('p',{style:{fontSize:11,color:'var(--muted)'}},'Ustawienia są zapisane osobno na każdym urządzeniu (telefon i komputer mają własne).'));}
 
@@ -14918,12 +14947,14 @@ function Root(){
   var l=function(){set(function(x){return x+1;});};listeners.push(l);
   var f=function(){setView(window.M2027_view);};window.addEventListener('m2027view',f);
   return function(){listeners=listeners.filter(function(x){return x!==l;});window.removeEventListener('m2027view',f);};},[]);
- var overlay=null;
- if(cfg.enabled&&!unlocked()){
+ var overlay=null,locked=cfg.enabled&&!unlocked();
+ var back=h('button',{className:'btn btn-ghost m2027-back',onClick:function(){window.M2027_goto&&window.M2027_goto('dashboard');}},'← Wróć');
+ if(locked){
   if(cfg.scope==='all')overlay=h('div',{className:'m2027-full'},h(Form));
-  else if(viewLocked(view))overlay=h('div',{className:'m2027-panel'},h('div',{style:{display:'flex',justifyContent:'center',paddingTop:60}},h(Form)));
+  else if(viewLocked(view))overlay=h('div',{className:'m2027-panel'},view==='lock'?back:null,h('div',{style:{display:'flex',justifyContent:'center',paddingTop:20}},h(Form)));
  }else if(view==='lock')overlay=h('div',{className:'m2027-panel'},h(Settings));
- return h(React.Fragment,null,h(App,{lockTick:t}),overlay);}
+ var gear=(view==='dashboard'&&!(locked&&cfg.scope==='all'))?h('button',{className:'m2027-gear',title:'PIN i blokada',onClick:function(){window.M2027_goto&&window.M2027_goto('lock');}},'🔒'):null;
+ return h(React.Fragment,null,h(App,{lockTick:t}),gear,overlay);}
 
 ReactDOM.render(h(Root,null),document.getElementById('root'));
 })();
