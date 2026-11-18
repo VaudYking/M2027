@@ -14347,6 +14347,7 @@ function App() {
   }, []);
   // Worker żyje przez cały czas działania apki – nie resetuje się przy zmianie zakładki
   var globalWorkerRef = useRef(null);
+  useEffect(function () { window.M2027_view = view; window.dispatchEvent(new Event('m2027view')); }, [view]);
   useEffect(function () {
     globalWorkerRef.current = createWorker();
     return function () {
@@ -14477,7 +14478,7 @@ function App() {
     id: 'god',
     label: 'God',
     icon: 'timer'
-  }];
+  }, {id: 'lock', label: 'Hasło', icon: 'alert'}];
   var diaryNavItem = {
     id: 'diary',
     label: 'Dziennik',
@@ -14485,7 +14486,7 @@ function App() {
   };
   // Renderuj wszystkie widoki jednocześnie - ukrywaj przez display:none zamiast odmontowywać
   // Dzięki temu state wewnętrzny (AI chat, fiszki, quiz, rozgrzewka) przeżywa zmianę zakładki
-  var hide = function hide(v) { return { display: view === v ? 'block' : 'none' }; };
+  var hide = function hide(v) { return { display: view === v && !(window.M2027Lock && window.M2027Lock.viewLocked(v)) ? 'block' : 'none' }; };
   var renderView = function renderView() {
     return /*#__PURE__*/React.createElement('div', null,
       /*#__PURE__*/React.createElement('div', {style: hide('dashboard')}, /*#__PURE__*/React.createElement(Dashboard, {
@@ -14562,7 +14563,7 @@ function App() {
     id: 'check',
     label: 'Check',
     icon: 'check'
-  }];
+  }, {id: 'lock', label: 'Hasło', icon: 'alert'}];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -14816,7 +14817,116 @@ function createAttachMenu(galleryInput, cameraInput, anchorEl) {
   }, 50);
 }
 
-ReactDOM.render(/*#__PURE__*/React.createElement(App, null), document.getElementById('root'));
+(function(){
+var h=React.createElement,KEY='m2027_lock_v1',UNTIL='m2027_unlock_until',SESS='m2027_unlocked_session',ATT='m2027_lock_att';
+var VIEWS=[['dashboard','Dashboard'],['math','Matematyka'],['polish','Polski'],['english','Angielski'],['tracker','Tracker'],['chat','Czat'],['diary','Dziennik'],['god','God'],['check','Check']];
+var DEF={enabled:false,salt:'',hash:'',scope:'all',views:['diary','check'],mode:'session',durMin:480,idleMin:0,quietOn:false,quietFrom:'22:00',quietTo:'07:00'};
+var cfg=load(),mem=false,lastAct=Date.now(),listeners=[],lastState=null;
+function load(){try{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s)return Object.assign({},DEF,s);}catch(e){}return Object.assign({},DEF);}
+function emit(){listeners.forEach(function(f){f();});}
+function save(c){cfg=c;try{localStorage.setItem(KEY,JSON.stringify(c));}catch(e){}emit();}
+function hex(b){return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0');}).join('');}
+function hash(pw,salt){var d=salt+'::'+pw;
+ if(window.crypto&&crypto.subtle&&window.TextEncoder)return crypto.subtle.digest('SHA-256',new TextEncoder().encode(d)).then(hex);
+ var a=5381,b=52711;for(var i=0;i<d.length;i++){a=((a*33)^d.charCodeAt(i))>>>0;b=((b*31)+d.charCodeAt(i))>>>0;}
+ return Promise.resolve('f'+a.toString(16)+b.toString(16));}
+function newSalt(){var a=new Uint8Array(16);crypto.getRandomValues(a);return hex(a);}
+function mins(t){var p=(t||'0:0').split(':');return (+p[0])*60+(+p[1]);}
+function quiet(){if(!cfg.enabled||!cfg.quietOn)return false;var n=new Date(),m=n.getHours()*60+n.getMinutes(),f=mins(cfg.quietFrom),t=mins(cfg.quietTo);return f<=t?(m>=f&&m<t):(m>=f||m<t);}
+function unlocked(){if(!cfg.enabled)return true;if(quiet())return false;
+ try{if(cfg.mode==='launch')return mem;
+  if(cfg.mode==='session')return sessionStorage.getItem(SESS)==='1';
+  return Date.now()<(parseInt(localStorage.getItem(UNTIL))||0);}catch(e){return mem;}}
+function markUnlocked(){mem=true;lastAct=Date.now();
+ try{if(cfg.mode==='session')sessionStorage.setItem(SESS,'1');if(cfg.mode==='duration')localStorage.setItem(UNTIL,String(Date.now()+cfg.durMin*60000));}catch(e){}emit();}
+function lockNow(){mem=false;try{sessionStorage.removeItem(SESS);localStorage.removeItem(UNTIL);}catch(e){}emit();}
+function viewLocked(v){if(!cfg.enabled||unlocked())return false;return v==='lock'||cfg.scope==='all'||cfg.views.indexOf(v)!==-1;}
+window.M2027Lock={viewLocked:viewLocked};
+function att(){try{return JSON.parse(localStorage.getItem(ATT)||'{"n":0,"until":0}');}catch(e){return {n:0,until:0};}}
+function setAtt(a){try{localStorage.setItem(ATT,JSON.stringify(a));}catch(e){}}
+
+['mousemove','keydown','touchstart','click'].forEach(function(e){window.addEventListener(e,function(){lastAct=Date.now();},{passive:true});});
+function tick(){if(!cfg.enabled)return;
+ if(cfg.idleMin>0&&unlocked()&&Date.now()-lastAct>cfg.idleMin*60000)lockNow();
+ var u=unlocked();if(u!==lastState){lastState=u;emit();}}
+setInterval(tick,10000);document.addEventListener('visibilitychange',tick);
+
+var st=document.createElement('style');
+st.textContent='.m2027-full{position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px}'+
+'.m2027-panel{position:fixed;top:0;right:0;bottom:0;left:240px;z-index:90;background:var(--bg);overflow:auto;padding:32px 28px}'+
+'@media(max-width:768px){.m2027-panel{left:0;bottom:62px;padding:16px 14px}}'+
+'.m2027-panel input[type=checkbox],.m2027-panel input[type=radio]{width:18px;height:18px;padding:0}';
+document.head.appendChild(st);
+
+function Form(){
+ var a=React.useState(''),pw=a[0],setPw=a[1],b=React.useState(''),err=b[0],setErr=b[1],c=React.useState(0),bump=c[1];
+ React.useEffect(function(){var i=setInterval(function(){bump(function(x){return x+1;});},1000);return function(){clearInterval(i);};},[]);
+ var at=att(),wait=Math.max(0,Math.ceil((at.until-Date.now())/1000)),q=quiet();
+ function go(){if(wait>0||q||!pw)return;
+  hash(pw,cfg.salt).then(function(x){
+   if(x===cfg.hash){setAtt({n:0,until:0});markUnlocked();}
+   else{var n=att().n+1;setAtt({n:n,until:n>=5?Date.now()+Math.min(300,30*(n-4))*1000:0});setErr('Złe hasło');setPw('');}});}
+ return h('div',{className:'card',style:{maxWidth:340,width:'100%',textAlign:'center'}},
+  h('div',{style:{fontSize:40}},'🔒'),
+  h('h2',{style:{fontFamily:'Syne',margin:'8px 0 16px'}},'M2027'),
+  q?h('p',{style:{color:'var(--math)',fontSize:13}},'Dostęp zablokowany do '+cfg.quietTo+'.'):
+  h('div',null,
+   h('input',{type:'password',autoFocus:true,value:pw,placeholder:'Hasło',onChange:function(e){setPw(e.target.value);setErr('');},onKeyDown:function(e){if(e.key==='Enter')go();},style:{textAlign:'center',marginBottom:10}}),
+   h('button',{className:'btn btn-primary',style:{width:'100%'},onClick:go},'Odblokuj'),
+   err&&h('p',{style:{color:'var(--math)',fontSize:12,marginTop:10}},err),
+   wait>0&&h('p',{style:{color:'var(--gold)',fontSize:12,marginTop:6}},'Zbyt wiele prób. Poczekaj '+wait+' s.')));}
+
+function Settings(){
+ var s0=React.useState({o:'',n1:'',n2:'',msg:null}),s=s0[0],set=s0[1];
+ function M(t,ok){set(Object.assign({},s,{msg:{t:t,ok:!!ok}}));}
+ function upd(p){save(Object.assign({},cfg,p));markUnlocked();}
+ function setPass(){
+  if(s.n1.length<4)return M('Hasło min. 4 znaki');
+  if(s.n1!==s.n2)return M('Hasła się różnią');
+  function go(){var sl=newSalt();hash(s.n1,sl).then(function(x){save(Object.assign({},cfg,{salt:sl,hash:x,enabled:true}));markUnlocked();set({o:'',n1:'',n2:'',msg:{t:'Hasło zapisane, blokada włączona.',ok:true}});});}
+  if(cfg.hash)hash(s.o,cfg.salt).then(function(x){x===cfg.hash?go():M('Stare hasło jest złe');});else go();}
+ function card(t,kids){return h('div',{className:'card',style:{marginBottom:14}},h('h3',{style:{fontFamily:'Syne',fontSize:15,marginBottom:10}},t),kids);}
+ function lab(t){return h('div',{style:{fontSize:12,color:'var(--muted)',margin:'8px 0 4px'}},t);}
+ function sel(val,opts,on){return h('select',{value:val,onChange:function(e){on(e.target.value);}},opts.map(function(o){return h('option',{key:o[0],value:o[0]},o[1]);}));}
+ function inp(k,ph){return h('input',{type:'password',placeholder:ph,value:s[k],onChange:function(e){var p={};p[k]=e.target.value;set(Object.assign({},s,p));},style:{marginBottom:8}});}
+ return h('div',{style:{maxWidth:560,margin:'0 auto'}},
+  h('h2',{style:{fontFamily:'Syne',fontSize:22,marginBottom:16}},'🔒 Hasło i blokada'),
+  s.msg&&h('div',{style:{padding:'10px 14px',borderRadius:10,marginBottom:14,fontSize:13,background:s.msg.ok?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:s.msg.ok?'#4ade80':'#f87171'}},s.msg.t),
+  card('Blokada',h('div',null,
+   h('p',{style:{fontSize:13,color:'var(--muted)',marginBottom:10}},cfg.enabled?'Włączona':'Wyłączona'),
+   h('div',{style:{display:'flex',gap:8}},
+    h('button',{className:'btn '+(cfg.enabled?'btn-danger':'btn-primary'),onClick:function(){if(!cfg.hash)return M('Najpierw ustaw hasło poniżej');upd({enabled:!cfg.enabled});}},cfg.enabled?'Wyłącz blokadę':'Włącz blokadę'),
+    cfg.enabled&&h('button',{className:'btn btn-ghost',onClick:lockNow},'Zablokuj teraz')))),
+  card(cfg.hash?'Zmień hasło':'Ustaw hasło',h('div',null,cfg.hash&&inp('o','Stare hasło'),inp('n1','Nowe hasło (min. 4 znaki)'),inp('n2','Powtórz nowe hasło'),h('button',{className:'btn btn-primary',onClick:setPass},'Zapisz hasło'))),
+  card('Zakres',h('div',null,
+   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:6}},h('input',{type:'radio',checked:cfg.scope==='all',onChange:function(){upd({scope:'all'});}}),'Cała apka'),
+   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:6}},h('input',{type:'radio',checked:cfg.scope==='selected',onChange:function(){upd({scope:'selected'});}}),'Tylko wybrane zakładki'),
+   cfg.scope==='selected'&&h('div',{style:{marginLeft:26}},VIEWS.map(function(v){var on=cfg.views.indexOf(v[0])!==-1;
+    return h('label',{key:v[0],style:{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:4}},h('input',{type:'checkbox',checked:on,onChange:function(){upd({views:on?cfg.views.filter(function(x){return x!==v[0];}):cfg.views.concat([v[0]])});}}),v[1]);})))),
+  card('Kiedy odblokowane',h('div',null,
+   lab('Tryb'),sel(cfg.mode,[['launch','Pytaj przy każdym otwarciu apki'],['session','Do zamknięcia karty / apki'],['duration','Zapamiętaj na tym urządzeniu przez czas']],function(v){upd({mode:v});}),
+   cfg.mode==='duration'&&h('div',null,lab('Czas pamiętania'),sel(String(cfg.durMin),[['15','15 minut'],['60','1 godzina'],['480','8 godzin'],['1440','1 dzień'],['10080','7 dni'],['43200','30 dni']],function(v){upd({durMin:+v});})),
+   lab('Auto-blokada po bezczynności'),sel(String(cfg.idleMin),[['0','Wyłączona'],['5','5 minut'],['15','15 minut'],['30','30 minut'],['60','60 minut']],function(v){upd({idleMin:+v});}))),
+  card('Godziny blokady',h('div',null,
+   h('label',{style:{display:'flex',gap:8,alignItems:'center',fontSize:13}},h('input',{type:'checkbox',checked:cfg.quietOn,onChange:function(){upd({quietOn:!cfg.quietOn});}}),'W tych godzinach nic nie odblokuje (nawet dobre hasło)'),
+   cfg.quietOn&&h('div',{style:{display:'flex',gap:8,marginTop:8}},h('input',{type:'time',value:cfg.quietFrom,onChange:function(e){upd({quietFrom:e.target.value});}}),h('input',{type:'time',value:cfg.quietTo,onChange:function(e){upd({quietTo:e.target.value});}})))),
+  h('p',{style:{fontSize:11,color:'var(--muted)'}},'Ustawienia są zapisane osobno na każdym urządzeniu (telefon i komputer mają własne).'));}
+
+function Root(){
+ var a=React.useState(0),t=a[0],set=a[1],b=React.useState(window.M2027_view||'dashboard'),view=b[0],setView=b[1];
+ React.useEffect(function(){
+  var l=function(){set(function(x){return x+1;});};listeners.push(l);
+  var f=function(){setView(window.M2027_view);};window.addEventListener('m2027view',f);
+  return function(){listeners=listeners.filter(function(x){return x!==l;});window.removeEventListener('m2027view',f);};},[]);
+ var overlay=null;
+ if(cfg.enabled&&!unlocked()){
+  if(cfg.scope==='all')overlay=h('div',{className:'m2027-full'},h(Form));
+  else if(viewLocked(view))overlay=h('div',{className:'m2027-panel'},h('div',{style:{display:'flex',justifyContent:'center',paddingTop:60}},h(Form)));
+ }else if(view==='lock')overlay=h('div',{className:'m2027-panel'},h(Settings));
+ return h(React.Fragment,null,h(App,{lockTick:t}),overlay);}
+
+ReactDOM.render(h(Root,null),document.getElementById('root'));
+})();
 
 </script>
 </body>
