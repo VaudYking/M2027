@@ -4620,7 +4620,7 @@ var MiniPaint = function MiniPaint(_ref1) {
 };
 
 // ─── SUBTOPIC CHAT ────────────────────────────────────────────────────────────
-var SubtopicChat = function SubtopicChat(_ref11) {
+var SubtopicChatOld = function SubtopicChatOld(_ref11) {
   var subtopic = _ref11.subtopic,
     onSave = _ref11.onSave,
     onClose = _ref11.onClose;
@@ -5038,7 +5038,7 @@ var CHAT_SUBJECTS = [{
   color: 'var(--eng)',
   icon: '🌐'
 }];
-var ChatView = function ChatView(_ref12) {
+var ChatViewOld = function ChatViewOld(_ref12) {
   var chatData = _ref12.chatData,
     onUpdate = _ref12.onUpdate;
   var _useState73 = useState('math'),
@@ -9762,7 +9762,210 @@ var MathWarmup = function MathWarmup() {
 // ─── MATH VIEW (z zakładkami) ─────────────────────────────────────────────────
 
 // ─── POLISH CHAT (mini czat do notatek, zdjęć, rysunków) ─────────────────────
-var PolChat = function PolChat(_ref_pc) {
+// ─── JEDNOLITY, DUŻY PANEL NOTATEK (tekst + zdjęcia) — używany w Czacie, podtematach i zakładkach polskiego ───
+function polChatMerge(list, msg) {
+  if (msg && msg.__replace) {
+    var m = Object.assign({}, msg); delete m.__replace;
+    return list.map(function (x) { return x.id === m.id ? m : x; });
+  }
+  return list.concat([msg]);
+}
+var NotesPanel = function NotesPanel(props) {
+  var h = React.createElement, color = props.color || 'var(--eng)';
+  var msgs = props.messages || [];
+  var ref = React.useRef(msgs); ref.current = msgs;
+  var s1 = React.useState(''), text = s1[0], setText = s1[1];
+  var s2 = React.useState(null), lightbox = s2[0], setLightbox = s2[1];
+  var s3 = React.useState(null), paint = s3[0], setPaint = s3[1];
+  var s4 = React.useState(null), editing = s4[0], setEditing = s4[1];
+  var listRef = React.useRef(), fileRef = React.useRef(), camRef = React.useRef(), inputRef = React.useRef();
+  var prevLen = React.useRef(msgs.length);
+  React.useEffect(function () { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight; }, []);
+  React.useEffect(function () {
+    if (msgs.length > prevLen.current && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+    prevLen.current = msgs.length;
+  }, [msgs.length]);
+
+  function mid() { return 'm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
+  function now() { return new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }); }
+  function push(list) { ref.current = list; props.onChange(list); }
+  function addMsg(m) { push(ref.current.concat([m])); }
+  function sendText() {
+    var t = text.trim(); if (!t) return;
+    addMsg({ id: mid(), type: 'text', text: t, time: now() });
+    setText(''); setTimeout(function () { if (inputRef.current) inputRef.current.focus(); }, 0);
+  }
+  function addImage(dataUrl) {
+    return compressImage(dataUrl, 1600, 0.82).then(function (c) { addMsg({ id: mid(), type: 'image', src: c, time: now() }); });
+  }
+  function readFile(f) { return new Promise(function (res) { var r = new FileReader(); r.onload = function (ev) { res(ev.target.result); }; r.readAsDataURL(f); }); }
+  function addFiles(files) {
+    var chain = Promise.resolve();
+    Array.prototype.forEach.call(files || [], function (f) { chain = chain.then(function () { return readFile(f).then(addImage); }); });
+  }
+  function onFiles(e) { addFiles(e.target.files); e.target.value = ''; }
+  function onPaste(e) {
+    var list = (e.clipboardData && e.clipboardData.items) || [], files = [];
+    for (var i = 0; i < list.length; i++) if (list[i].type.indexOf('image/') === 0) files.push(list[i].getAsFile());
+    if (files.length) { e.preventDefault(); addFiles(files); }
+  }
+  function del(m) {
+    if (m.type === 'image' && !window.confirm('Usunąć to zdjęcie?')) return;
+    push(ref.current.filter(function (x) { return x.id !== m.id; }));
+  }
+  function replaceImage(id, dataUrl) {
+    compressImage(dataUrl, 1600, 0.82).then(function (c) {
+      push(ref.current.map(function (x) { return x.id === id ? Object.assign({}, x, { src: c }) : x; }));
+    });
+  }
+  function saveEdit() {
+    if (!editing) return;
+    var t = editing.text, id = editing.id;
+    if (!t.trim()) { setEditing(null); return; }
+    push(ref.current.map(function (x) { return x.id === id ? Object.assign({}, x, { text: t }) : x; }));
+    setEditing(null);
+  }
+  function clearAll() { if (window.confirm('Wyczyścić wszystkie notatki i zdjęcia tutaj?')) push([]); }
+  function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }
+
+  var pill = { background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '4px 10px', fontFamily: 'Outfit,sans-serif' };
+  function renderMsg(m) {
+    var isImg = m.type === 'image';
+    var valid = isImg && typeof m.src === 'string' && (m.src.indexOf('http') === 0 || m.src.indexOf('data:image') === 0);
+    var isEd = editing && editing.id === m.id;
+    var body;
+    if (isImg) {
+      body = valid
+        ? h('img', { src: m.src, alt: '', onClick: function () { setLightbox(m.src); }, style: { width: '100%', height: 'auto', maxHeight: '85vh', objectFit: 'contain', display: 'block', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface2)', cursor: 'zoom-in' } })
+        : h('div', { style: { padding: '24px 16px', borderRadius: 14, border: '1px dashed var(--border)', color: 'var(--muted)', fontSize: 13, textAlign: 'center' } }, '☁️ Zdjęcie jest w chmurze — pojawi się po synchronizacji');
+    } else if (isEd) {
+      body = h('div', { style: { width: '100%' } },
+        h('textarea', { value: editing.text, autoFocus: true, rows: 5, onChange: function (e) { setEditing({ id: editing.id, text: e.target.value }); }, style: { fontSize: 16, lineHeight: 1.6, width: '100%' } }),
+        h('div', { style: { display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' } },
+          h('button', { className: 'btn btn-ghost', onClick: function () { setEditing(null); } }, 'Anuluj'),
+          h('button', { className: 'btn btn-primary', style: { background: color }, onClick: saveEdit }, 'Zapisz')));
+    } else {
+      body = h('div', { style: { padding: '12px 16px', borderRadius: '16px 16px 4px 16px', background: color, color: '#fff', fontSize: 15.5, lineHeight: 1.65, wordBreak: 'break-word', whiteSpace: 'pre-wrap', userSelect: 'text' } }, renderTextWithLinks(m.text || ''));
+    }
+    return h('div', { key: m.id, style: { display: 'flex', flexDirection: 'column', alignItems: isImg || isEd ? 'stretch' : 'flex-end', gap: 6 } },
+      isImg || isEd ? body : h('div', { style: { maxWidth: '94%' } }, body),
+      !isEd && h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' } },
+        h('span', { style: { fontSize: 11, color: 'var(--muted)', marginRight: 4 } }, m.time || ''),
+        isImg && valid && h('button', { style: pill, onClick: function () { setPaint({ id: m.id, src: m.src }); } }, '🎨 Edytuj'),
+        !isImg && h('button', { style: pill, onClick: function () { setEditing({ id: m.id, text: m.text || '' }); } }, '✏️ Edytuj'),
+        h('button', { style: Object.assign({}, pill, { color: 'var(--math)' }), onClick: function () { del(m); } }, '🗑 Usuń')));
+  }
+
+  return h('div', { style: { display: 'flex', flexDirection: 'column', height: props.fill ? '100%' : (props.height || '72vh'), minHeight: props.fill ? 0 : 460, gap: 10 } },
+    lightbox && h(ImageLightbox, { src: lightbox, onClose: function () { setLightbox(null); } }),
+    paint && h(MiniPaint, {
+      initialImage: paint.id ? paint.src : undefined,
+      onSend: function (d) { if (paint.id) replaceImage(paint.id, d); else addImage(d); },
+      onClose: function () { setPaint(null); }
+    }),
+    h('div', { ref: listRef, style: { flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 16 } },
+      msgs.length === 0 && h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', gap: 8, textAlign: 'center', padding: '30px 10px' } },
+        h('div', { style: { fontSize: 52 } }, '📝'),
+        h('p', { style: { fontSize: 15 } }, 'Wpisz notatkę albo dodaj zdjęcie'),
+        h('p', { style: { fontSize: 12, opacity: .7 } }, 'Zdjęcia pokazują się na całą szerokość. Ctrl+V wkleja zrzut ekranu.')),
+      msgs.map(renderMsg)),
+    h('div', { style: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 10 } },
+      h('textarea', {
+        ref: inputRef, value: text, rows: 3, onChange: function (e) { setText(e.target.value); }, onPaste: onPaste, onKeyDown: onKey,
+        placeholder: 'Napisz notatkę… (Enter = wyślij, Shift+Enter = nowa linia, Ctrl+V = wklej zdjęcie)',
+        style: { width: '100%', minHeight: 84, fontSize: 16, lineHeight: 1.6, resize: 'vertical', border: 'none', background: 'transparent', outline: 'none', padding: '6px 8px', fontFamily: 'Outfit,sans-serif' }
+      }),
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 } },
+        h('button', { className: 'btn btn-ghost', style: { fontSize: 14, padding: '10px 14px' }, onClick: function (e) { createAttachMenu(fileRef.current, camRef.current, e.currentTarget); } }, '📎 Zdjęcie'),
+        h('button', { className: 'btn btn-ghost', style: { fontSize: 14, padding: '10px 14px' }, onClick: function () { setPaint({ id: null }); } }, '🎨 Rysuj'),
+        msgs.length > 0 && h('button', { className: 'btn btn-ghost', style: { fontSize: 12, padding: '8px 10px', color: 'var(--muted)' }, onClick: clearAll }, '🗑 Wyczyść'),
+        h('div', { style: { flex: 1 } }),
+        h('button', { className: 'btn btn-primary', style: { background: color, fontSize: 15, padding: '12px 28px' }, onClick: sendText }, 'Wyślij')),
+      h('input', { ref: fileRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: onFiles }),
+      h('input', { ref: camRef, type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' }, onChange: onFiles })));
+};
+
+// Czat (zakładka)
+var ChatView = function ChatView(p) {
+  var h = React.createElement;
+  var a = React.useState('math'), active = a[0], setActive = a[1];
+  var chatRef = React.useRef(p.chatData || {}); chatRef.current = p.chatData || {};
+  var subject = CHAT_SUBJECTS.filter(function (s) { return s.id === active; })[0];
+  var messages = (p.chatData || {})[active] || [];
+  function setList(list) { var next = Object.assign({}, chatRef.current); next[active] = list; chatRef.current = next; p.onUpdate(next); }
+  function download(name, mime, content) {
+    var blob = new Blob([content], { type: mime }), url = URL.createObjectURL(blob), el = document.createElement('a');
+    el.href = url; el.download = name; el.click(); URL.revokeObjectURL(url);
+  }
+  function exportTXT() {
+    if (!messages.length) return alert('Brak wiadomości do eksportu.');
+    var lines = ['MaturaHub — Eksport notatek', 'Przedmiot: ' + subject.label, 'Data eksportu: ' + new Date().toLocaleString('pl-PL'), 'Liczba wiadomości: ' + messages.length, '─'.repeat(50), ''];
+    messages.forEach(function (m) { lines.push('[' + (m.time || '') + '] ' + (m.type === 'image' ? '📷 [Zdjęcie/Rysunek]' : m.text)); });
+    download('maturahub_' + active + '_' + new Date().toISOString().slice(0, 10) + '.txt', 'text/plain;charset=utf-8', lines.join('\n'));
+  }
+  function exportHTML() {
+    if (!messages.length) return alert('Brak wiadomości do eksportu.');
+    var col = { math: '#ef4444', polish: '#a855f7', english: '#3b82f6' }[active];
+    var rows = messages.map(function (m) {
+      if (m.type === 'image') return '<div class="msg"><span class="time">' + (m.time || '') + '</span><img src="' + m.src + '" style="max-width:100%;border-radius:8px;display:block;margin-top:6px;"/></div>';
+      var esc = String(m.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>');
+      return '<div class="msg"><span class="time">' + (m.time || '') + '</span><div class="bubble">' + esc + '</div></div>';
+    }).join('\n');
+    var html = '<!DOCTYPE html><html lang="pl"><head><meta charset="UTF-8"/><title>MaturaHub – ' + subject.label + '</title><style>body{font-family:system-ui,sans-serif;background:#0a0a0f;color:#e8e8f0;padding:32px;max-width:800px;margin:0 auto;}h1{font-size:22px;}.meta{font-size:12px;color:#6b6b80;margin-bottom:24px;}.msg{margin-bottom:16px;padding:12px 16px;background:#18181f;border-radius:12px;border-left:3px solid ' + col + ';}.time{font-size:11px;color:#6b6b80;display:block;margin-bottom:4px;}.bubble{font-size:14px;line-height:1.6;}@media print{body{background:#fff;color:#111;}.msg{background:#f5f5f5;}}</style></head><body><h1>' + subject.icon + ' ' + subject.label + ' — Notatki</h1><div class="meta">Eksport z MaturaHub · ' + new Date().toLocaleString('pl-PL') + ' · ' + messages.length + ' wiadomości</div>' + rows + '</body></html>';
+    download('maturahub_' + active + '_' + new Date().toISOString().slice(0, 10) + '.html', 'text/html;charset=utf-8', html);
+  }
+  var small = window.innerWidth <= 768;
+  return h('div', { className: 'fade-in', style: { display: 'flex', flexDirection: 'column', height: small ? 'calc(100vh - 120px)' : 'calc(100vh - 80px)', minHeight: 480 } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+      h('h2', { style: { fontFamily: 'Syne', fontSize: 22 } }, '💬 Czat — Notatki'),
+      h('div', { style: { display: 'flex', gap: 6 } },
+        h('button', { className: 'btn btn-ghost', style: { fontSize: 11, padding: '4px 10px' }, onClick: exportTXT }, '📄 TXT'),
+        h('button', { className: 'btn btn-ghost', style: { fontSize: 11, padding: '4px 10px' }, onClick: exportHTML }, '🌐 HTML'))),
+    h('div', { style: { display: 'flex', gap: 4, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 12, padding: 4, marginBottom: 10 } },
+      CHAT_SUBJECTS.map(function (s) {
+        var n = ((p.chatData || {})[s.id] || []).length;
+        return h('button', { key: s.id, onClick: function () { setActive(s.id); }, style: { flex: 1, padding: '10px 8px', borderRadius: 9, fontFamily: 'Syne', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: active === s.id ? s.color : 'transparent', color: active === s.id ? '#fff' : 'var(--muted)' } },
+          s.icon + ' ' + s.label, n > 0 && h('span', { style: { marginLeft: 5, background: 'rgba(255,255,255,.22)', borderRadius: 99, fontSize: 10, padding: '0 5px' } }, n));
+      })),
+    h('div', { style: { flex: 1, minHeight: 0 } }, h(NotesPanel, { key: active, messages: messages, onChange: setList, color: subject.color, fill: true })));
+};
+
+// Notatki do podtematu (okno)
+var SubtopicChat = function SubtopicChat(p) {
+  var h = React.createElement;
+  var st = React.useState(p.subtopic.chatMessages || []), msgs = st[0], setMsgs = st[1];
+  function commit(list) { setMsgs(list); p.onSave(list); }
+  var small = window.innerWidth <= 768;
+  return ReactDOM.createPortal(h('div', { className: 'fade-in', onClick: function (e) { if (e.target === e.currentTarget) p.onClose(); },
+    style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: small ? 6 : 20 } },
+    h('div', { onClick: function (e) { e.stopPropagation(); }, style: { width: '100%', maxWidth: 1000, height: small ? '96vh' : '92vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 20, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 32px 80px rgba(0,0,0,.7)' } },
+      h('div', { style: { padding: '12px 18px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: 'var(--surface2)', flexShrink: 0 } },
+        h('span', { style: { fontSize: 16, color: 'var(--eng)', fontWeight: 700, fontFamily: 'Syne' } }, '📝 ' + p.subtopic.text),
+        h('button', { onClick: p.onClose, style: { background: 'var(--surface3)', border: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text)', fontSize: 13, padding: '6px 14px', borderRadius: 8, fontFamily: 'Outfit,sans-serif', flexShrink: 0 } }, '✕ Zamknij')),
+      h('div', { style: { flex: 1, minHeight: 0, padding: small ? 8 : 14, display: 'flex', flexDirection: 'column' } },
+        h(NotesPanel, { messages: msgs, onChange: commit, color: 'var(--eng)', fill: true })))), document.body);
+};
+
+// Notatki w zakładkach polskiego (lektury, motywy, zadania, rozprawka) — ten sam panel
+var PolChat = function PolChat(p) {
+  var prev = React.useRef(p.messages || []); prev.current = p.messages || [];
+  function onChange(next) {
+    var old = prev.current; prev.current = next;
+    if (!next.length && old.length) { p.onClear(); return; }
+    var oldMap = {}, nextIds = {};
+    old.forEach(function (m) { oldMap[m.id] = m; });
+    next.forEach(function (m) { nextIds[m.id] = 1; });
+    old.forEach(function (m) { if (!nextIds[m.id]) p.onDelete(m.id); });
+    next.forEach(function (m) {
+      var o = oldMap[m.id];
+      if (!o) p.onSend(m);
+      else if (o.src !== m.src || o.text !== m.text) p.onSend(Object.assign({}, m, { __replace: true }));
+    });
+  }
+  return React.createElement(NotesPanel, { messages: p.messages || [], onChange: onChange, color: p.color || 'var(--pol)', height: '75vh' });
+};
+
+var PolChatOld = function PolChatOld(_ref_pc) {
   var messages = _ref_pc.messages, onSend = _ref_pc.onSend, onDelete = _ref_pc.onDelete, onClear = _ref_pc.onClear, color = _ref_pc.color;
   color = color || 'var(--pol)';
   var _t = useState(''), txt = _t[0], setTxt = _t[1];
@@ -9949,8 +10152,10 @@ var PolishView = function PolishView(_ref_pol) {
   var subject = _ref_pol.subject, onUpdate = _ref_pol.onUpdate;
   var _pt = useState('dzialy'), polTab = _pt[0], setPolTab = _pt[1];
   var polData = subject.polData || {};
+  var latestSubj = React.useRef(subject); latestSubj.current = subject;
 
-  function savePolData(d){ onUpdate(Object.assign({}, subject, { polData: d })); }
+  function savePolData(d){ latestSubj.current = Object.assign({}, latestSubj.current, { polData: d }); onUpdate(latestSubj.current); }
+  function curPD(){ return latestSubj.current.polData || {}; }
   function mergeList(key, init){ return polData[key] || init; }
 
   var lektury = mergeList('lektury', INITIAL_LEKTURY);
@@ -9959,11 +10164,11 @@ var PolishView = function PolishView(_ref_pol) {
   var rozprawka = mergeList('rozprawka', INITIAL_ROZPRAWKA);
   var ustna = mergeList('ustna', INITIAL_USTNA);
 
-  function updLektury(fn){ var n=fn(lektury); savePolData(Object.assign({},polData,{lektury:n})); }
-  function updMotywy(fn){ var n=fn(motywy); savePolData(Object.assign({},polData,{motywy:n})); }
-  function updZadania(fn){ var n=fn(zadania); savePolData(Object.assign({},polData,{zadania:n})); }
-  function updRozprawka(fn){ var n=fn(rozprawka); savePolData(Object.assign({},polData,{rozprawka:n})); }
-  function updUstna(fn){ var n=fn(ustna); savePolData(Object.assign({},polData,{ustna:n})); }
+  function updLektury(fn){ var pd=curPD(); savePolData(Object.assign({},pd,{lektury:fn(pd.lektury||INITIAL_LEKTURY)})); }
+  function updMotywy(fn){ var pd=curPD(); savePolData(Object.assign({},pd,{motywy:fn(pd.motywy||INITIAL_MOTYWY)})); }
+  function updZadania(fn){ var pd=curPD(); savePolData(Object.assign({},pd,{zadania:fn(pd.zadania||INITIAL_ZADANIA)})); }
+  function updRozprawka(fn){ var pd=curPD(); savePolData(Object.assign({},pd,{rozprawka:fn(pd.rozprawka||INITIAL_ROZPRAWKA)})); }
+  function updUstna(fn){ var pd=curPD(); savePolData(Object.assign({},pd,{ustna:fn(pd.ustna||INITIAL_USTNA)})); }
 
   var TABS=[{id:'dzialy',l:'Działy',e:'📚'},{id:'lektury',l:'Lektury',e:'📖'},{id:'motywy',l:'Motywy',e:'🎭'},{id:'zadania',l:'Zadania',e:'✏️'},{id:'rozprawka',l:'Rozprawka',e:'📝'},{id:'ustna',l:'Ustna',e:'🎤'},{id:'sheets',l:'Arkusze',e:'📄'}];
 
@@ -9991,7 +10196,7 @@ var PolishView = function PolishView(_ref_pol) {
 
 // ── helpers ──
 function polChatSend(list, setFn, itemId, msg){
-  setFn(function(prev){ return prev.map(function(x){ return x.id===itemId ? Object.assign({},x,{chat:(x.chat||[]).concat([msg])}) : x; }); });
+  setFn(function(prev){ return prev.map(function(x){ return x.id===itemId ? Object.assign({},x,{chat:polChatMerge(x.chat||[],msg)}) : x; }); });
 }
 function polChatDelete(list, setFn, itemId, msgId){
   setFn(function(prev){ return prev.map(function(x){ return x.id===itemId ? Object.assign({},x,{chat:(x.chat||[]).filter(function(m){return m.id!==msgId;})}) : x; }); });
@@ -10081,7 +10286,7 @@ var PolLektury = function PolLektury(_ref_l) {
         React.createElement(PolChat,{
           messages:lek.chat||[],
           color:'var(--pol)',
-          onSend:function(msg){ onUpdate(function(prev){return prev.map(function(l){return l.id===lek.id?Object.assign({},l,{chat:(l.chat||[]).concat([msg])}):l;})}); },
+          onSend:function(msg){ onUpdate(function(prev){return prev.map(function(l){return l.id===lek.id?Object.assign({},l,{chat:polChatMerge(l.chat||[],msg)}):l;})}); },
           onDelete:function(msgId){ onUpdate(function(prev){return prev.map(function(l){return l.id===lek.id?Object.assign({},l,{chat:(l.chat||[]).filter(function(m){return m.id!==msgId;})}):l;})}); },
           onClear:function(){ onUpdate(function(prev){return prev.map(function(l){return l.id===lek.id?Object.assign({},l,{chat:[]}):l;})}); }
         })
@@ -10206,7 +10411,7 @@ var PolMotywy = function PolMotywy(_ref_m) {
       React.createElement('div',{style:{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:14,padding:'14px'}},
         React.createElement('div',{style:{fontSize:11,color:'var(--muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:10}},'📝 Notatki i zdjęcia do tego motywu'),
         React.createElement(PolChat,{messages:mot.chat||[],color:mot.kolor||'var(--pol)',
-          onSend:function(msg){onUpdate(function(prev){return prev.map(function(m){return m.id===mot.id?Object.assign({},m,{chat:(m.chat||[]).concat([msg])}):m;})});},
+          onSend:function(msg){onUpdate(function(prev){return prev.map(function(m){return m.id===mot.id?Object.assign({},m,{chat:polChatMerge(m.chat||[],msg)}):m;})});},
           onDelete:function(msgId){onUpdate(function(prev){return prev.map(function(m){return m.id===mot.id?Object.assign({},m,{chat:(m.chat||[]).filter(function(c){return c.id!==msgId;})}):m;})});},
           onClear:function(){onUpdate(function(prev){return prev.map(function(m){return m.id===mot.id?Object.assign({},m,{chat:[]}):m;})});}
         })
@@ -10284,7 +10489,7 @@ var PolZadania = function PolZadania(_ref_z) {
       React.createElement('div',{style:{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:14,padding:'14px'}},
         React.createElement('div',{style:{fontSize:11,color:'var(--muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:10}},'📝 Twoje notatki i odpowiedź'),
         React.createElement(PolChat,{messages:zad.chat||[],color:'var(--pol)',
-          onSend:function(msg){onUpdate(function(prev){return prev.map(function(z){return z.id===zad.id?Object.assign({},z,{chat:(z.chat||[]).concat([msg])}):z;})});},
+          onSend:function(msg){onUpdate(function(prev){return prev.map(function(z){return z.id===zad.id?Object.assign({},z,{chat:polChatMerge(z.chat||[],msg)}):z;})});},
           onDelete:function(msgId){onUpdate(function(prev){return prev.map(function(z){return z.id===zad.id?Object.assign({},z,{chat:(z.chat||[]).filter(function(m){return m.id!==msgId;})}):z;})});},
           onClear:function(){onUpdate(function(prev){return prev.map(function(z){return z.id===zad.id?Object.assign({},z,{chat:[]}):z;})});}
         })
@@ -10412,10 +10617,10 @@ var PolUstna = function PolUstna(_ref_u) {
           rows:8,
           style:{width:'100%',padding:'10px 12px',borderRadius:9,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontSize:13,fontFamily:'Outfit,sans-serif',resize:'vertical',lineHeight:1.6,boxSizing:'border-box',marginBottom:10}
         }),
-        (temat.chat && temat.chat.filter(function(m){return m.type==='image';}).length>0) && React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8,marginBottom:10}},
+        (temat.chat && temat.chat.filter(function(m){return m.type==='image';}).length>0) && React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:12,marginBottom:12}},
           temat.chat.filter(function(m){return m.type==='image';}).map(function(m){
             return React.createElement('div',{key:m.id,style:{position:'relative'}},
-              React.createElement('img',{src:m.src,onClick:function(){setImgLightbox(m.src);},style:{width:74,height:74,objectFit:'cover',borderRadius:8,cursor:'zoom-in',border:'1px solid var(--border)',display:'block'}}),
+              React.createElement('img',{src:m.src,onClick:function(){setImgLightbox(m.src);},style:{width:'100%',height:'auto',maxHeight:'85vh',objectFit:'contain',borderRadius:12,cursor:'zoom-in',border:'1px solid var(--border)',display:'block'}}),
               React.createElement('button',{onClick:function(e){e.stopPropagation();removeImageFromTemat(temat.id,m.id);},style:{position:'absolute',top:-6,right:-6,width:18,height:18,borderRadius:'50%',background:'rgba(239,68,68,.9)',border:'none',color:'#fff',fontSize:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,padding:0}},'✕')
             );
           })
@@ -10590,7 +10795,7 @@ var PolRozprawka = function PolRozprawka(_ref_r) {
       React.createElement('div',{style:{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:14,padding:'14px'}},
         React.createElement('div',{style:{fontSize:11,color:'var(--muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:10}},'📝 Notatki do rozprawek (zdjęcia, szkice, myśli)'),
         React.createElement(PolChat,{messages:rozprawka.chat||[],color:'var(--pol)',
-          onSend:function(msg){onUpdate(function(prev){return Object.assign({},prev,{chat:(prev.chat||[]).concat([msg])});});},
+          onSend:function(msg){onUpdate(function(prev){return Object.assign({},prev,{chat:polChatMerge(prev.chat||[],msg)});});},
           onDelete:function(msgId){onUpdate(function(prev){return Object.assign({},prev,{chat:(prev.chat||[]).filter(function(m){return m.id!==msgId;})});});},
           onClear:function(){onUpdate(function(prev){return Object.assign({},prev,{chat:[]});});}
         })
@@ -15127,7 +15332,7 @@ function App() {
     style: {
       flex: 1,
       padding: '32px 28px',
-      maxWidth: 800,
+      maxWidth: 1100,
       margin: '0 auto',
       width: '100%'
     }
