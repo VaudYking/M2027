@@ -7178,7 +7178,7 @@ var EngTopics = function EngTopics(_ref18) {
 
 /* ---------- OPIS OBRAZKA ---------- */
 var isValidImg = function isValidImg(v) { return v && (v.startsWith('http') || v.startsWith('data:image')); };
-var EngImageDesc = function EngImageDesc(_ref19) {
+var EngImageDescOld = function EngImageDescOld(_ref19) {
   var data = _ref19.data,
     onChange = _ref19.onChange;
   var _React$useState17 = React.useState(data || []),
@@ -7457,7 +7457,7 @@ var EngImageDesc = function EngImageDesc(_ref19) {
 };
 
 /* ---------- EMAIL ---------- */
-var EngEmail = function EngEmail(_ref20) {
+var EngEmailOld = function EngEmailOld(_ref20) {
   var data = _ref20.data,
     onChange = _ref20.onChange;
   var _React$useState23 = React.useState(data || []),
@@ -7738,6 +7738,123 @@ var EngEmail = function EngEmail(_ref20) {
 /* ---------- FISZKI ---------- */
 // ─── SRS ENGINE (Spaced Repetition) ──────────────────────────────────────────
 // Klucz localStorage dla danych SRS
+// ─── ZADANIA ZE ZDJĘCIEM + TEKSTEM (Opis obrazka, Email) — edycja zawsze po ID zadania, nigdy po numerze ───
+var EngPicTasks = function EngPicTasks(props) {
+  var h = React.createElement, tk = props.textKey;
+  function norm(d) {
+    var seen = {};
+    return (d || []).map(function (it, i) {
+      var id = it && it.id;
+      if (!id || seen[id]) id = props.prefix + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 6);
+      seen[id] = 1;
+      return id === it.id ? it : Object.assign({}, it, { id: id });
+    });
+  }
+  var a = React.useState(function () { return norm(props.data); }), items = a[0], setItems = a[1];
+  var itemsRef = React.useRef(items);
+  var c = React.useState(function () { return items.length ? items[0].id : null; }), curId = c[0], setCurId = c[1];
+  var curRef = React.useRef(curId); curRef.current = curId;
+  var lb = React.useState(null), lightbox = lb[0], setLightbox = lb[1];
+  var fileRef = React.useRef(), cameraRef = React.useRef();
+
+  function commit(next) { itemsRef.current = next; setItems(next); props.onChange(next); }
+  function patch(id, p) {
+    commit(itemsRef.current.map(function (it) { return it.id === id ? Object.assign({}, it, p) : it; }));
+  }
+  var idx = items.findIndex(function (it) { return it.id === curId; });
+  if (idx < 0 && items.length) idx = 0;
+  var cur = idx >= 0 ? items[idx] : null;
+
+  function addNew() {
+    var id = props.prefix + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    var item = { id: id, img: null }; item[tk] = '';
+    commit(itemsRef.current.concat([item]));
+    setCurId(id);
+  }
+  function removeCur() {
+    if (!cur) return;
+    var list = itemsRef.current, i = list.findIndex(function (it) { return it.id === cur.id; });
+    var next = list.filter(function (it) { return it.id !== cur.id; });
+    commit(next);
+    setCurId(next.length ? next[Math.max(0, i - 1)].id : null);
+  }
+  function go(delta) {
+    var list = itemsRef.current, i = list.findIndex(function (it) { return it.id === curRef.current; });
+    var j = Math.min(list.length - 1, Math.max(0, i + delta));
+    if (list[j]) setCurId(list[j].id);
+  }
+  function putImage(targetId, file) {
+    var r = new FileReader();
+    r.onload = function (ev) {
+      compressImage(ev.target.result, 1600, 0.82).then(function (img) { patch(targetId, { img: img }); });
+    };
+    r.readAsDataURL(file);
+  }
+  function onFile(e) {
+    var f = e.target.files && e.target.files[0]; e.target.value = '';
+    if (f && curRef.current) putImage(curRef.current, f);
+  }
+  function onPaste(e) {
+    var list = e.clipboardData && e.clipboardData.items;
+    if (!list || !curRef.current) return;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].type.indexOf('image') !== -1) {
+        putImage(curRef.current, list[i].getAsFile());
+        e.preventDefault();
+        break;
+      }
+    }
+  }
+  function menu(event) {
+    return createAttachMenu(fileRef.current, cameraRef.current, event && event.currentTarget ? event.currentTarget : fileRef.current);
+  }
+  var hasImg = cur && isValidImg(cur.img);
+
+  return h('div', { onPaste: onPaste },
+    lightbox && h(ImageLightbox, { src: lightbox, onClose: function () { setLightbox(null); } }),
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 } },
+      h('h3', { style: { fontFamily: 'Syne', fontSize: 18 } }, props.title),
+      h('button', { className: 'btn btn-ghost', style: { fontSize: 12 }, onClick: addNew }, h(Icon, { name: 'plus', size: 13 }), ' Nowe zadanie')),
+    items.length === 0 && h('div', { style: { textAlign: 'center', padding: '40px 0', color: 'var(--muted)' } },
+      h('div', { style: { fontSize: 48, marginBottom: 12 } }, props.emptyIcon),
+      h('p', { style: { marginBottom: 16 } }, 'Brak zadań. Dodaj pierwsze!'),
+      h('button', { className: 'btn btn-primary', onClick: addNew }, 'Dodaj zadanie')),
+    cur && h('div', null,
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 } },
+        h('button', { className: 'btn btn-ghost', style: { padding: '6px 12px' }, disabled: idx === 0, onClick: function () { go(-1); } }, '← Poprzednie'),
+        h('span', { style: { flex: 1, textAlign: 'center', fontSize: 13, color: 'var(--muted)' } }, 'Zadanie ' + (idx + 1) + ' / ' + items.length),
+        h('button', { className: 'btn btn-ghost', style: { padding: '6px 12px' }, disabled: idx === items.length - 1, onClick: function () { go(1); } }, 'Następne →'),
+        h('button', { className: 'btn btn-danger', style: { padding: '6px 10px', fontSize: 12 }, onClick: function () { if (window.confirm('Usunąć to zadanie?')) removeCur(); } }, '✕ usuń')),
+      h('div', { className: 'card fade-in', key: cur.id },
+        h('div', { style: { position: 'relative', marginBottom: 16 } },
+          h('div', {
+            style: { minHeight: props.imgMin, borderRadius: 12, border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: hasImg ? 'default' : 'pointer', overflow: 'hidden', background: 'var(--surface2)' },
+            onClick: function (e) { if (!hasImg) menu(e); }
+          }, hasImg
+            ? h('img', { src: cur.img, alt: 'zadanie', style: { maxWidth: '100%', maxHeight: props.imgMax, objectFit: 'contain', borderRadius: 10, cursor: 'zoom-in' }, onClick: function () { setLightbox(cur.img); } })
+            : h('div', { style: { textAlign: 'center', color: 'var(--muted)' } },
+                h('div', { style: { fontSize: 36, marginBottom: 8 } }, '📎'),
+                h('div', { style: { fontSize: 13 } }, 'Kliknij, aby dodać zdjęcie (aparat / galeria) lub wklej Ctrl+V'))),
+          hasImg && h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
+            h('button', { className: 'btn btn-ghost', style: { fontSize: 11, padding: '3px 10px' }, onClick: function () { setLightbox(cur.img); } }, '🔍 Powiększ'),
+            h('button', { className: 'btn btn-ghost', style: { fontSize: 11, padding: '3px 10px' }, onClick: menu }, '🔄 Zmień zdjęcie'))),
+        h('input', { ref: fileRef, type: 'file', accept: 'image/*', style: { display: 'none' }, onChange: onFile }),
+        h('input', { ref: cameraRef, type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' }, onChange: onFile }),
+        h('label', { style: { fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' } }, props.textLabel),
+        h('textarea', {
+          key: cur.id,
+          value: cur[tk] || '',
+          onChange: function (e) { patch(cur.id, (function (o) { o[tk] = e.target.value; return o; })({})); },
+          placeholder: props.placeholder, rows: props.rows, style: { fontSize: 13 }
+        }))));
+};
+var EngImageDesc = function EngImageDesc(props) {
+  return React.createElement(EngPicTasks, { data: props.data, onChange: props.onChange, textKey: 'desc', prefix: 'img_', title: '🖼 Opis obrazka', textLabel: 'Twój opis', placeholder: 'Opisz obrazek po angielsku...', rows: 8, imgMin: 180, imgMax: 320, emptyIcon: '🖼' });
+};
+var EngEmail = function EngEmail(props) {
+  return React.createElement(EngPicTasks, { data: props.data, onChange: props.onChange, textKey: 'text', prefix: 'em_', title: '✉️ Email', textLabel: 'Twój email', placeholder: 'Napisz email po angielsku...', rows: 10, imgMin: 140, imgMax: 260, emptyIcon: '✉️' });
+};
+
 var SRS_KEY = 'engSRS_v2';
 function srsLoad() {
   try { return JSON.parse(localStorage.getItem(SRS_KEY) || '{}'); } catch(e) { return {}; }
