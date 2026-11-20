@@ -5470,7 +5470,8 @@ var SectionCard = function SectionCard(_ref13) {
     subject = _ref13.subject,
     onUpdate = _ref13.onUpdate,
     searchQuery = _ref13.searchQuery,
-    onRemove = _ref13.onRemove;
+    onRemove = _ref13.onRemove,
+    dragHandle = _ref13.dragHandle;
   var _useState83 = useState(false),
     _useState84 = _slicedToArray(_useState83, 2),
     expanded = _useState84[0],
@@ -5704,7 +5705,7 @@ var SectionCard = function SectionCard(_ref13) {
     onClick: function onClick() {
       return setExpanded(!expanded);
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, dragHandle || null, /*#__PURE__*/React.createElement("div", {
     className: "checkbox-custom ".concat(section.completed ? 'checked' : ''),
     onClick: function onClick(e) {
       e.stopPropagation();
@@ -5857,7 +5858,8 @@ var SectionCard = function SectionCard(_ref13) {
     }
   }, section.subtopics.map(function (st) {
     return /*#__PURE__*/React.createElement("div", {
-      key: st.id
+      key: st.id,
+      "data-secid": st.id
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
@@ -5867,7 +5869,7 @@ var SectionCard = function SectionCard(_ref13) {
         borderRadius: 8,
         background: 'var(--surface2)'
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, reorderHandle(function (ids) { onUpdate(Object.assign({}, section, { subtopics: reorderByIds(section.subtopics, ids) })); }), /*#__PURE__*/React.createElement("div", {
       className: "checkbox-custom ".concat(st.done ? 'checked' : ''),
       style: {
         width: 16,
@@ -6301,6 +6303,98 @@ function startSecDrag(e, sections, commit) {
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', cancel);
   loop();
+}
+
+function reorderByIds(list, ids) {
+  var set = {}, byId = {}, k = 0;
+  ids.forEach(function (id) { set[id] = 1; });
+  list.forEach(function (x) { byId[x.id] = x; });
+  return list.map(function (x) { return set[x.id] ? byId[ids[k++]] : x; });
+}
+function startReorder(e, onIds) {
+  if (e.button !== undefined && e.button !== 0) return;
+  var card = e.currentTarget.closest('[data-secid]');
+  if (!card) return;
+  var container = card.parentElement;
+  var cards = Array.prototype.filter.call(container.children, function (c) { return c.getAttribute && c.getAttribute('data-secid'); });
+  var from = cards.indexOf(card);
+  if (from < 0) return;
+  e.preventDefault();
+  var sx0 = window.scrollX || window.pageXOffset || 0, sy0 = window.scrollY || window.pageYOffset || 0;
+  var startX = e.clientX + sx0, startY = e.clientY + sy0;
+  var rects = cards.map(function (c) { var r = c.getBoundingClientRect(); return { left: r.left + sx0, top: r.top + sy0, w: r.width, h: r.height }; });
+  var column = rects.every(function (r) { return Math.abs(r.left - rects[0].left) < 2; });
+  var gap = rects.length > 1 && column ? Math.max(0, rects[1].top - (rects[0].top + rects[0].h)) : 0;
+  var curX = e.clientX, curY = e.clientY, to = from, raf = null;
+  card.style.position = 'relative'; card.style.zIndex = '50'; card.style.transition = 'none';
+  card.style.boxShadow = '0 12px 32px rgba(0,0,0,.5)'; card.style.opacity = '.95';
+  cards.forEach(function (c, i) { if (i !== from) c.style.transition = 'transform .15s'; });
+  var prevSel = document.body.style.userSelect; document.body.style.userSelect = 'none';
+  function layout() {
+    var sx = window.scrollX || window.pageXOffset || 0, sy = window.scrollY || window.pageYOffset || 0;
+    var dx = curX + sx - startX, dy = curY + sy - startY;
+    card.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    var cx = rects[from].left + rects[from].w / 2 + dx, cy = rects[from].top + rects[from].h / 2 + dy;
+    if (column) {
+      var n = 0;
+      rects.forEach(function (r, i) { if (i !== from && r.top + r.h / 2 < cy) n++; });
+      to = n;
+    } else {
+      var best = 0, bd = Infinity;
+      rects.forEach(function (r, i) { var d = Math.pow(r.left + r.w / 2 - cx, 2) + Math.pow(r.top + r.h / 2 - cy, 2); if (d < bd) { bd = d; best = i; } });
+      to = best;
+    }
+    var order = cards.map(function (_, i) { return i; });
+    order.splice(from, 1); order.splice(to, 0, from);
+    if (column) {
+      var top = rects[0].top;
+      order.forEach(function (ci) {
+        if (ci !== from) { var off = top - rects[ci].top; cards[ci].style.transform = off ? 'translateY(' + off + 'px)' : ''; }
+        top += rects[ci].h + gap;
+      });
+    } else {
+      order.forEach(function (ci, p) {
+        if (ci !== from) {
+          var ox = rects[p].left - rects[ci].left, oy = rects[p].top - rects[ci].top;
+          cards[ci].style.transform = (ox || oy) ? 'translate(' + ox + 'px,' + oy + 'px)' : '';
+        }
+      });
+    }
+  }
+  function loop() {
+    var vh = window.innerHeight;
+    if (curY < 70) window.scrollBy(0, -14); else if (curY > vh - 70) window.scrollBy(0, 14);
+    layout(); raf = requestAnimationFrame(loop);
+  }
+  function move(ev) { curX = ev.clientX; curY = ev.clientY; }
+  function finish(apply) {
+    cancelAnimationFrame(raf);
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', cancel);
+    document.body.style.userSelect = prevSel;
+    var ids = cards.map(function (c) { return c.getAttribute('data-secid'); });
+    cards.forEach(function (c) { c.style.transform = ''; c.style.transition = ''; c.style.position = ''; c.style.zIndex = ''; c.style.boxShadow = ''; c.style.opacity = ''; });
+    if (apply && to !== from) {
+      var id = ids.splice(from, 1)[0];
+      ids.splice(to, 0, id);
+      onIds(ids);
+    }
+  }
+  function up() { finish(true); }
+  function cancel() { finish(false); }
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', cancel);
+  loop();
+}
+function reorderHandle(onIds, extra) {
+  return React.createElement('span', {
+    title: 'Przytrzymaj i przeciągnij, aby zmienić kolejność',
+    onPointerDown: function (e) { startReorder(e, onIds); },
+    onClick: function (e) { e.stopPropagation(); },
+    style: Object.assign({ cursor: 'grab', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', padding: '8px 6px', margin: '-8px 0 -8px -6px', color: 'var(--muted)', fontSize: 16, lineHeight: 1, flexShrink: 0 }, extra || {})
+  }, '⋮⋮');
 }
 
 var EngWordsInner = function EngWordsInner(_ref14) {
@@ -6987,11 +7081,12 @@ var EngSentences = function EngSentences(_ref17) {
       style: { color: 'var(--muted)', fontSize: 13, padding: '20px 0' }
     }, "Brak dzia\u0142\xF3w. Dodaj pierwszy!"),
     sections.map(function (sec) {
-      return /*#__PURE__*/React.createElement("div", { key: sec.id, className: "card", style: { marginBottom: 12 } },
+      return /*#__PURE__*/React.createElement("div", { key: sec.id, "data-secid": sec.id, className: "card", style: { marginBottom: 12 } },
         /*#__PURE__*/React.createElement("div", {
           style: { display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' },
           onClick: function () { setOpenSec(openSec === sec.id ? null : sec.id); }
         },
+          reorderHandle(function (ids) { save(reorderByIds(sections, ids)); }),
           /*#__PURE__*/React.createElement("span", {
             style: { fontFamily: 'Syne', fontWeight: 600, fontSize: 15, flex: 1 }
           }, sec.name),
@@ -9451,11 +9546,13 @@ var EnglishView = function EnglishView(_ref25) {
   }, subject.sections.map(function (section) {
     return /*#__PURE__*/React.createElement("div", {
       key: section.id,
+      "data-secid": section.id,
       style: {
         marginBottom: 12
       }
     }, /*#__PURE__*/React.createElement(SectionCard, {
       section: section,
+      dragHandle: reorderHandle(function (ids) { _onUpdate(Object.assign({}, subject, { sections: reorderByIds(subject.sections, ids) })); }),
       subject: subject,
       onUpdate: function onUpdate(updated) {
         var sections = subject.sections.map(function (s) {
@@ -10331,7 +10428,8 @@ var PolLektury = function PolLektury(_ref_l) {
     React.createElement('input',{type:'text',placeholder:'Szukaj...',value:filter,onChange:function(e){setFilter(e.target.value);},style:{width:'100%',padding:'8px 12px',borderRadius:9,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontSize:13,fontFamily:'Outfit,sans-serif',marginBottom:12,boxSizing:'border-box'}}),
     React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:7}},
       filtered.map(function(lek){
-        return React.createElement('div',{key:lek.id,style:{background:'var(--surface2)',border:'1px solid '+(lek.done?'rgba(34,197,94,.3)':'var(--border)'),borderRadius:11,padding:'11px 13px',cursor:'pointer',display:'flex',alignItems:'center',gap:10},onClick:function(){setSel(lek.id);}},
+        return React.createElement('div',{key:lek.id,'data-secid':lek.id,style:{background:'var(--surface2)',border:'1px solid '+(lek.done?'rgba(34,197,94,.3)':'var(--border)'),borderRadius:11,padding:'11px 13px',cursor:'pointer',display:'flex',alignItems:'center',gap:10},onClick:function(){setSel(lek.id);}},
+          reorderHandle(function(ids){onUpdate(function(prev){return reorderByIds(prev,ids);});}),
           React.createElement('div',{onClick:function(e){e.stopPropagation();toggleDone(lek.id);},style:{width:20,height:20,borderRadius:5,border:'2px solid '+(lek.done?'#22c55e':'var(--border)'),background:lek.done?'#22c55e':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,cursor:'pointer',transition:'all .15s'}},lek.done?React.createElement('span',{style:{color:'#fff',fontSize:11}},'✓'):null),
           React.createElement('div',{style:{flex:1,minWidth:0}},
             React.createElement('div',{style:{fontWeight:600,fontSize:13,color:lek.done?'#22c55e':'var(--text)',marginBottom:1}},lek.tytul),
@@ -10441,7 +10539,8 @@ var PolMotywy = function PolMotywy(_ref_m) {
     ),
     React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:10}},
       motywy.map(function(mot){
-        return React.createElement('div',{key:mot.id,onClick:function(){setSel(mot.id);},style:{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:12,padding:'14px',cursor:'pointer',transition:'all .15s'}},
+        return React.createElement('div',{key:mot.id,'data-secid':mot.id,onClick:function(){setSel(mot.id);},style:{position:'relative',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:12,padding:'14px',cursor:'pointer',transition:'all .15s'}},
+          reorderHandle(function(ids){onUpdate(function(prev){return reorderByIds(prev,ids);});},{position:'absolute',top:6,right:4,margin:0,padding:'6px 8px'}),
           React.createElement('div',{style:{width:10,height:10,borderRadius:'50%',background:mot.kolor,marginBottom:8}}),
           React.createElement('div',{style:{fontWeight:600,fontSize:13,color:'var(--text)',marginBottom:4}},mot.nazwa),
           React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},((mot.przyklady||[]).length)+' realizacji'),
@@ -10522,7 +10621,8 @@ var PolZadania = function PolZadania(_ref_z) {
     ),
     React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:8}},
       filtered.map(function(z){
-        return React.createElement('div',{key:z.id,onClick:function(){setSel(z.id);},style:{background:'var(--surface2)',border:'1px solid '+(z.done?'rgba(34,197,94,.3)':'var(--border)'),borderRadius:11,padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'flex-start',gap:10}},
+        return React.createElement('div',{key:z.id,'data-secid':z.id,onClick:function(){setSel(z.id);},style:{background:'var(--surface2)',border:'1px solid '+(z.done?'rgba(34,197,94,.3)':'var(--border)'),borderRadius:11,padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'flex-start',gap:10}},
+          reorderHandle(function(ids){onUpdate(function(prev){return reorderByIds(prev,ids);});}),
           React.createElement('div',{onClick:function(e){e.stopPropagation();toggleDone(z.id);},style:{width:20,height:20,borderRadius:5,border:'2px solid '+(z.done?'#22c55e':'var(--border)'),background:z.done?'#22c55e':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1,cursor:'pointer',transition:'all .15s'}},z.done?React.createElement('span',{style:{color:'#fff',fontSize:11}},'✓'):null),
           React.createElement('div',{style:{flex:1,minWidth:0}},
             z.typ && React.createElement('div',{style:{fontSize:10,color:'var(--pol)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:3}},z.typ),
@@ -10673,7 +10773,8 @@ var PolUstna = function PolUstna(_ref_u) {
     ),
     React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:7}},
       filtered.map(function(u){
-        return React.createElement('div',{key:u.id,style:{background:'var(--surface2)',border:'1px solid '+(u.done?'rgba(34,197,94,.3)':'var(--border)'),borderRadius:11,padding:'11px 13px',cursor:'pointer',display:'flex',alignItems:'flex-start',gap:10},onClick:function(){setSel(u.id);}},
+        return React.createElement('div',{key:u.id,'data-secid':u.id,style:{background:'var(--surface2)',border:'1px solid '+(u.done?'rgba(34,197,94,.3)':'var(--border)'),borderRadius:11,padding:'11px 13px',cursor:'pointer',display:'flex',alignItems:'flex-start',gap:10},onClick:function(){setSel(u.id);}},
+          reorderHandle(function(ids){onUpdate(function(prev){return reorderByIds(prev,ids);});}),
           React.createElement('div',{onClick:function(e){e.stopPropagation();toggleDone(u.id);},style:{width:20,height:20,borderRadius:5,border:'2px solid '+(u.done?'#22c55e':'var(--border)'),background:u.done?'#22c55e':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1,cursor:'pointer',transition:'all .15s'}},u.done?React.createElement('span',{style:{color:'#fff',fontSize:11}},'✓'):null),
           React.createElement('div',{style:{flex:1,minWidth:0}},
             React.createElement('div',{style:{display:'flex',alignItems:'baseline',gap:7,marginBottom:3,flexWrap:'wrap'}},
@@ -11452,11 +11553,13 @@ var SubjectView = function SubjectView(_ref26) {
   }, searchQuery ? 'Brak wyników dla tego zapytania.' : 'Brak działów.'), filteredSections.map(function (section) {
     return /*#__PURE__*/React.createElement("div", {
       key: section.id,
+      "data-secid": section.id,
       style: {
         position: 'relative'
       }
     }, /*#__PURE__*/React.createElement(SectionCard, {
       section: section,
+      dragHandle: reorderHandle(function (ids) { onUpdate(Object.assign({}, subject, { sections: reorderByIds(subject.sections, ids) })); }),
       subject: subject,
       onUpdate: updateSection,
       searchQuery: searchQuery,
