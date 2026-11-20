@@ -9778,6 +9778,8 @@ var NotesPanel = function NotesPanel(props) {
   var s2 = React.useState(null), lightbox = s2[0], setLightbox = s2[1];
   var s3 = React.useState(null), paint = s3[0], setPaint = s3[1];
   var s4 = React.useState(null), editing = s4[0], setEditing = s4[1];
+  var s5 = React.useState(null), sel = s5[0], setSel = s5[1];
+  var s6 = React.useState(false), foc = s6[0], setFoc = s6[1];
   var listRef = React.useRef(), fileRef = React.useRef(), camRef = React.useRef(), inputRef = React.useRef();
   var prevLen = React.useRef(msgs.length);
   React.useEffect(function () { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight; }, []);
@@ -9811,6 +9813,7 @@ var NotesPanel = function NotesPanel(props) {
   }
   function del(m) {
     if (m.type === 'image' && !window.confirm('Usunąć to zdjęcie?')) return;
+    setSel(null);
     push(ref.current.filter(function (x) { return x.id !== m.id; }));
   }
   function replaceImage(id, dataUrl) {
@@ -9836,7 +9839,7 @@ var NotesPanel = function NotesPanel(props) {
     var body;
     if (isImg) {
       body = valid
-        ? h('img', { src: m.src, alt: '', onClick: function () { setLightbox(m.src); }, style: { width: '100%', height: 'auto', maxHeight: '85vh', objectFit: 'contain', display: 'block', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface2)', cursor: 'zoom-in' } })
+        ? h('img', { src: m.src, alt: '', onClick: function () { setSel(sel === m.id ? null : m.id); }, style: { width: '100%', height: 'auto', maxHeight: '85vh', objectFit: 'contain', display: 'block', borderRadius: 14, border: sel === m.id ? '2px solid ' + color : '1px solid var(--border)', background: 'var(--surface2)', cursor: 'pointer' } })
         : h('div', { style: { padding: '24px 16px', borderRadius: 14, border: '1px dashed var(--border)', color: 'var(--muted)', fontSize: 13, textAlign: 'center' } }, '☁️ Zdjęcie jest w chmurze — pojawi się po synchronizacji');
     } else if (isEd) {
       body = h('div', { style: { width: '100%' } },
@@ -9845,42 +9848,43 @@ var NotesPanel = function NotesPanel(props) {
           h('button', { className: 'btn btn-ghost', onClick: function () { setEditing(null); } }, 'Anuluj'),
           h('button', { className: 'btn btn-primary', style: { background: color }, onClick: saveEdit }, 'Zapisz')));
     } else {
-      body = h('div', { style: { padding: '12px 16px', borderRadius: '16px 16px 4px 16px', background: color, color: '#fff', fontSize: 15.5, lineHeight: 1.65, wordBreak: 'break-word', whiteSpace: 'pre-wrap', userSelect: 'text' } }, renderTextWithLinks(m.text || ''));
+      body = h('div', { onClick: function () { var t = window.getSelection && String(window.getSelection()); if (t) return; setSel(sel === m.id ? null : m.id); }, style: { cursor: 'pointer', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', background: color, color: '#fff', fontSize: 15.5, lineHeight: 1.65, wordBreak: 'break-word', whiteSpace: 'pre-wrap', userSelect: 'text', boxShadow: sel === m.id ? '0 0 0 2px rgba(255,255,255,.55)' : 'none' } }, renderTextWithLinks(m.text || ''));
     }
     return h('div', { key: m.id, style: { display: 'flex', flexDirection: 'column', alignItems: isImg || isEd ? 'stretch' : 'flex-end', gap: 6 } },
       isImg || isEd ? body : h('div', { style: { maxWidth: '94%' } }, body),
-      !isEd && h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' } },
-        h('span', { style: { fontSize: 11, color: 'var(--muted)', marginRight: 4 } }, m.time || ''),
+      !isEd && sel === m.id && h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' } },
+        isImg && valid && h('button', { style: pill, onClick: function () { setLightbox(m.src); } }, '🔍 Powiększ'),
         isImg && valid && h('button', { style: pill, onClick: function () { setPaint({ id: m.id, src: m.src }); } }, '🎨 Edytuj'),
         !isImg && h('button', { style: pill, onClick: function () { setEditing({ id: m.id, text: m.text || '' }); } }, '✏️ Edytuj'),
         h('button', { style: Object.assign({}, pill, { color: 'var(--math)' }), onClick: function () { del(m); } }, '🗑 Usuń')));
   }
 
-  return h('div', { style: { display: 'flex', flexDirection: 'column', height: props.fill ? '100%' : (props.height || '72vh'), minHeight: props.fill ? 0 : 460, gap: 10 } },
+  return h('div', { style: props.fill ? { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, gap: 10 } : { display: 'flex', flexDirection: 'column', gap: 10 } },
     lightbox && h(ImageLightbox, { src: lightbox, onClose: function () { setLightbox(null); } }),
     paint && h(MiniPaint, {
       initialImage: paint.id ? paint.src : undefined,
       onSend: function (d) { if (paint.id) replaceImage(paint.id, d); else addImage(d); },
       onClose: function () { setPaint(null); }
     }),
-    h('div', { ref: listRef, style: { flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 16 } },
-      msgs.length === 0 && h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', gap: 8, textAlign: 'center', padding: '30px 10px' } },
+    h('div', { ref: listRef, style: Object.assign(props.fill ? { flex: 1, minHeight: 0 } : { minHeight: 140, maxHeight: '65vh' }, { overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 16 }) },
+      msgs.length === 0 && h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', gap: 8, textAlign: 'center', padding: '24px 10px' } },
         h('div', { style: { fontSize: 52 } }, '📝'),
         h('p', { style: { fontSize: 15 } }, 'Wpisz notatkę albo dodaj zdjęcie'),
         h('p', { style: { fontSize: 12, opacity: .7 } }, 'Zdjęcia pokazują się na całą szerokość. Ctrl+V wkleja zrzut ekranu.')),
       msgs.map(renderMsg)),
-    h('div', { style: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 10 } },
+    h('div', { style: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 8 } },
       h('textarea', {
-        ref: inputRef, value: text, rows: 3, onChange: function (e) { setText(e.target.value); }, onPaste: onPaste, onKeyDown: onKey,
-        placeholder: 'Napisz notatkę… (Enter = wyślij, Shift+Enter = nowa linia, Ctrl+V = wklej zdjęcie)',
-        style: { width: '100%', minHeight: 84, fontSize: 16, lineHeight: 1.6, resize: 'vertical', border: 'none', background: 'transparent', outline: 'none', padding: '6px 8px', fontFamily: 'Outfit,sans-serif' }
+        ref: inputRef, value: text, rows: (foc || text) ? 4 : 1, onChange: function (e) { setText(e.target.value); }, onPaste: onPaste, onKeyDown: onKey,
+        onFocus: function () { setFoc(true); }, onBlur: function () { setTimeout(function () { setFoc(false); }, 250); },
+        placeholder: 'Napisz notatkę…',
+        style: { width: '100%', minHeight: (foc || text) ? 110 : 40, fontSize: 16, lineHeight: 1.5, resize: 'none', border: 'none', background: 'transparent', outline: 'none', padding: '6px 8px', fontFamily: 'Outfit,sans-serif', transition: 'min-height .15s' }
       }),
-      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 } },
-        h('button', { className: 'btn btn-ghost', style: { fontSize: 14, padding: '10px 14px' }, onClick: function (e) { createAttachMenu(fileRef.current, camRef.current, e.currentTarget); } }, '📎 Zdjęcie'),
-        h('button', { className: 'btn btn-ghost', style: { fontSize: 14, padding: '10px 14px' }, onClick: function () { setPaint({ id: null }); } }, '🎨 Rysuj'),
-        msgs.length > 0 && h('button', { className: 'btn btn-ghost', style: { fontSize: 12, padding: '8px 10px', color: 'var(--muted)' }, onClick: clearAll }, '🗑 Wyczyść'),
+      h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 } },
+        h('button', { className: 'btn btn-ghost', style: { fontSize: 13, padding: '8px 12px' }, onClick: function (e) { createAttachMenu(fileRef.current, camRef.current, e.currentTarget); } }, '📎 Zdjęcie'),
+        h('button', { className: 'btn btn-ghost', style: { fontSize: 13, padding: '8px 12px' }, onClick: function () { setPaint({ id: null }); } }, '🎨 Rysuj'),
+        (foc || text) && msgs.length > 0 && h('button', { className: 'btn btn-ghost', style: { fontSize: 12, padding: '8px 10px', color: 'var(--muted)' }, onClick: clearAll }, '🗑'),
         h('div', { style: { flex: 1 } }),
-        h('button', { className: 'btn btn-primary', style: { background: color, fontSize: 15, padding: '12px 28px' }, onClick: sendText }, 'Wyślij')),
+        h('button', { className: 'btn btn-primary', style: { background: color, fontSize: 14, padding: '9px 20px' }, onClick: sendText }, 'Wyślij')),
       h('input', { ref: fileRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: onFiles }),
       h('input', { ref: camRef, type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' }, onChange: onFiles })));
 };
